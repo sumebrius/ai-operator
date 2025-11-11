@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use std::fs;
+use std::{env, fs};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -10,7 +10,7 @@ pub struct AppState {
 impl AppState {
     pub fn start() -> Self {
         let prompt = Bytes::from(fs::read("./prompt.txt").expect("No prompt"));
-        let openai_key = "foobarbaz".to_string();
+        let openai_key = env::var("OPENAI_API_KEY").expect("No OpenAI API Key");
 
         Self { prompt, openai_key }
     }
