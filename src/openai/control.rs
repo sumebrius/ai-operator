@@ -83,7 +83,7 @@ impl OpenApiCall for AcceptCall {
 #[derive(Debug)]
 enum MaxTokens {
     Tokens(u16),
-    Inf,
+    _Inf,
 }
 
 impl Serialize for MaxTokens {
@@ -93,17 +93,17 @@ impl Serialize for MaxTokens {
     {
         match self {
             MaxTokens::Tokens(int) => serializer.serialize_u16(*int),
-            MaxTokens::Inf => serializer.serialize_str("inf"),
+            MaxTokens::_Inf => serializer.serialize_str("inf"),
         }
     }
 }
 
 #[derive(Serialize, Debug)]
-pub struct RejectCall {
+pub struct _RejectCall {
     status_code: u16,
 }
 
-impl Default for RejectCall {
+impl Default for _RejectCall {
     fn default() -> Self {
         Self {
             status_code: 603, // SIP 603 Decline
@@ -111,16 +111,16 @@ impl Default for RejectCall {
     }
 }
 
-impl OpenApiCall for RejectCall {
+impl OpenApiCall for _RejectCall {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/reject", API_ROOT, call_id)
     }
 }
 
 #[derive(Serialize, Debug)]
-pub struct Hangup {}
+pub struct _Hangup {}
 
-impl OpenApiCall for Hangup {
+impl OpenApiCall for _Hangup {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/hangup", API_ROOT, call_id)
     }
