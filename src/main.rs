@@ -6,6 +6,8 @@ use axum::{
     routing::{get, post},
 };
 
+use crate::config::AppState;
+
 mod config;
 mod openai;
 
@@ -15,7 +17,8 @@ async fn main() {
 
     let webhook_server = Router::new()
         .route("/", get(|| async { "Sup" }))
-        .route("/", post(openai::webhook::webhook));
+        .route("/", post(openai::webhook::webhook))
+        .with_state(AppState::start());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 

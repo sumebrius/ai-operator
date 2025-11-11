@@ -1,7 +1,9 @@
-use axum::Json;
+use axum::{Json, extract::State};
 
 use chrono::{DateTime, Utc, serde::ts_seconds};
 use serde::{self, Deserialize, Serialize};
+
+use crate::{config::AppState, openai::control::handle_call};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RealtimeCallIncoming {
@@ -11,6 +13,12 @@ pub struct RealtimeCallIncoming {
     #[serde(with = "ts_seconds")]
     created_at: DateTime<Utc>,
     data: RealtimeCallIncomingData,
+}
+
+impl RealtimeCallIncoming {
+    pub fn get_id(&self) -> &str {
+        &self.id
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -25,6 +33,7 @@ struct SipHeader {
     value: String,
 }
 
-pub async fn webhook(Json(payload): Json<RealtimeCallIncoming>) {
-    info!("{:?}", payload);
+pub async fn webhook(State(state): State<AppState>, Json(payload): Json<RealtimeCallIncoming>) {
+    info!("Webhook call received ID: {}", payload.get_id());
+    tokio::spawn(handle_call(state, payload));
 }
