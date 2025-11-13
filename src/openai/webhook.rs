@@ -34,6 +34,6 @@ struct SipHeader {
 }
 
 pub async fn webhook(State(state): State<AppState>, Json(payload): Json<RealtimeCallIncoming>) {
-    info!("Webhook call received ID: {}", payload.get_id());
+    info_span!("webhook", call.id = payload.get_id()).in_scope(|| info!("Webhook received"));
     tokio::spawn(handle_call(state, payload));
 }

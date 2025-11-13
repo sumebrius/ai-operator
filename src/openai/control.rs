@@ -1,3 +1,7 @@
+use crate::{
+    config::{API_ROOT, AppState, WS_URI},
+    openai::webhook::RealtimeCallIncoming,
+};
 use bytes::Bytes;
 use reqwest::{Client, Response, header};
 use serde::{self, Serialize};
@@ -5,29 +9,21 @@ use tokio::net::TcpStream;
 use tokio_stream::StreamExt;
 use tokio_tungstenite::{self, MaybeTlsStream, WebSocketStream, tungstenite};
 
-use crate::{
-    config::{API_ROOT, AppState, WS_URI},
-    openai::webhook::RealtimeCallIncoming,
-};
-
+#[tracing::instrument(skip_all, fields(call.id = &call.get_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
+    info!("Handling call");
     let control_client = OpenAiControlSession::new(&state, &call);
 
     if let Err(err) = control_client.accept().await {
-        error!(
-            { call = &call.get_id() },
-            "Error response accepting call: {}", err
-        );
+        error!("Error response accepting call: {}", err);
         return;
     };
+    info!("Call Answered");
 
     let mut ws_client = match control_client.connect_ws().await {
         Ok((client, _)) => client,
         Err(err) => {
-            error!(
-                { call = &call.get_id() },
-                "Error response accepting call: {}", err
-            );
+            error!("Error starting websocket connection: {}", err);
             return;
         }
     };
