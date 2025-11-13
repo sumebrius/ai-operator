@@ -1,43 +1,99 @@
 use bytes::Bytes;
-use reqwest::{Client, Response};
+use reqwest::{Client, Response, header};
 use serde::{self, Serialize};
+use tokio::net::TcpStream;
+use tokio_stream::StreamExt;
+use tokio_tungstenite::{self, MaybeTlsStream, WebSocketStream, tungstenite};
 
 use crate::{
-    config::{API_ROOT, AppState},
+    config::{API_ROOT, AppState, WS_URI},
     openai::webhook::RealtimeCallIncoming,
 };
 
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
-    let control_client = OpenAiControlSession::new(&state, call);
-    let prompt = state.prompt();
+    let control_client = OpenAiControlSession::new(&state, &call);
 
-    let _ = control_client
-        .execute(AcceptCall::with_prompt(prompt))
-        .await;
+    if let Err(err) = control_client.accept().await {
+        error!(
+            { call = &call.get_id() },
+            "Error response accepting call: {}", err
+        );
+        return;
+    };
+
+    let mut ws_client = match control_client.connect_ws().await {
+        Ok((client, _)) => client,
+        Err(err) => {
+            error!(
+                { call = &call.get_id() },
+                "Error response accepting call: {}", err
+            );
+            return;
+        }
+    };
+
+    while let Some(msg) = ws_client.next().await {
+        debug!("Message Received: {:?}", msg);
+    }
 }
 
 pub struct OpenAiControlSession {
     client: Client,
     token: String,
     call_id: String,
+    prompt: Bytes,
 }
 
 impl OpenAiControlSession {
-    pub fn new(state: &AppState, call: RealtimeCallIncoming) -> Self {
+    pub fn new(state: &AppState, call: &RealtimeCallIncoming) -> Self {
+        let token = state.openai_key().to_string();
+
+        let mut headers = header::HeaderMap::new();
+        let mut auth =
+            header::HeaderValue::try_from(format!("Bearer {}", token)).expect("Fucky API key");
+        auth.set_sensitive(true);
+        headers.insert(header::AUTHORIZATION, auth);
+        let client = reqwest::ClientBuilder::new()
+            .default_headers(headers)
+            .build()
+            .expect("Fucky Client");
+
         Self {
-            client: Client::new(),
-            token: state.openai_key().to_string(),
+            client,
+            token,
             call_id: call.get_id().to_string(),
+            prompt: state.prompt(),
         }
     }
 
-    pub async fn execute(&self, action: impl OpenApiCall) -> Result<Response, reqwest::Error> {
+    pub async fn accept(&self) -> Result<Response, reqwest::Error> {
+        self.execute(AcceptCall::with_prompt(self.prompt.clone()))
+            .await
+    }
+
+    async fn execute(&self, action: impl OpenApiCall) -> Result<Response, reqwest::Error> {
         self.client
             .post(action.get_url(&self.call_id))
-            .bearer_auth(&self.token)
             .json(&action)
             .send()
             .await
+    }
+
+    pub async fn connect_ws(
+        &self,
+    ) -> Result<
+        (
+            WebSocketStream<MaybeTlsStream<TcpStream>>,
+            http::Response<Option<Vec<u8>>>,
+        ),
+        tungstenite::Error,
+    > {
+        let uri = format!("{}?call_id={}", WS_URI, self.call_id);
+        let request = http::Request::get(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {}", self.token))
+            .body(())
+            .expect("Fucky WS URI or Header");
+        tokio_tungstenite::connect_async(request).await
     }
 }
 
