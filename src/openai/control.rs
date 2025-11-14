@@ -171,13 +171,13 @@ struct AudioFormat {
 #[derive(Debug)]
 enum Codec {
     _Pcm,
-    Alaw,
-    _Ulaw,
+    _Alaw,
+    Ulaw,
 }
 
 impl Default for Codec {
     fn default() -> Self {
-        Self::Alaw
+        Self::Ulaw
     }
 }
 
@@ -188,8 +188,8 @@ impl Serialize for Codec {
     {
         match self {
             Codec::_Pcm => serializer.serialize_str("audio/pcm"),
-            Codec::Alaw => serializer.serialize_str("audio/pcma"),
-            Codec::_Ulaw => serializer.serialize_str("audio/pcmu"),
+            Codec::_Alaw => serializer.serialize_str("audio/pcma"),
+            Codec::Ulaw => serializer.serialize_str("audio/pcmu"),
         }
     }
 }
