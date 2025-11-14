@@ -97,11 +97,10 @@ impl OpenAiControlSession {
         ),
         tungstenite::Error,
     > {
-        let uri = format!("{}?call_id={}", WS_URI, self.call_id);
-        let request = http::Request::get(uri)
-            .header(header::AUTHORIZATION, format!("Bearer {}", self.token))
-            .body(())
+        let uri = http::Uri::try_from(format!("{}?call_id={}", WS_URI, self.call_id))
             .expect("Fucky WS URI or Header");
+        let request = tungstenite::ClientRequestBuilder::new(uri)
+            .with_header("Authorization", format!("Bearer {}", self.token));
         tokio_tungstenite::connect_async(request).await
     }
 }
