@@ -64,6 +64,9 @@ pub async fn validate_webhook(
         }
     };
 
+    // let content = String::from_utf8_lossy(&payload);
+    // debug!("Incoming content: {}", content);
+
     if let Some(webhook) = state.webhook() {
         let headers = &parts.headers;
         if webhook.verify(&payload, headers).is_err() {
