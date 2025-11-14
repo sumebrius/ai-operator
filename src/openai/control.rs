@@ -68,11 +68,24 @@ impl OpenAiControlSession {
     }
 
     async fn execute(&self, action: impl OpenApiCall) -> Result<Response, reqwest::Error> {
-        self.client
+        let response = self
+            .client
             .post(action.get_url(&self.call_id))
             .json(&action)
             .send()
-            .await
+            .await?;
+
+        if !response.status().is_success() {
+            let error = response.error_for_status_ref().unwrap_err();
+            error!(
+                "{} response from OpenAI API: {:?}",
+                response.status(),
+                response.text().await
+            );
+            Err(error)
+        } else {
+            response.error_for_status()
+        }
     }
 
     pub async fn connect_ws(
