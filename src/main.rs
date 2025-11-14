@@ -2,12 +2,12 @@
 extern crate tracing;
 
 use axum::{
-    Router,
+    Router, middleware,
     routing::{get, post},
 };
 use tower_http::trace::TraceLayer;
 
-use crate::config::AppState;
+use crate::{config::AppState, openai::webhook};
 
 mod config;
 mod openai;
@@ -18,11 +18,17 @@ async fn main() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
+    let state = AppState::start();
+
     let webhook_server = Router::new()
         .route("/", get(|| async { "Sup" }))
-        .route("/", post(openai::webhook::webhook))
+        .route("/", post(webhook::webhook))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            webhook::validate_webhook,
+        ))
         .layer(TraceLayer::new_for_http())
-        .with_state(AppState::start());
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 
