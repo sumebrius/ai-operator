@@ -115,6 +115,7 @@ pub struct AcceptCall<'a> {
     #[serde(rename = "type")]
     event_type: String,
     model: Option<String>,
+    audio: AudioConfig,
     instructions: &'a str,
     max_output_tokens: MaxTokens,
 }
@@ -133,6 +134,7 @@ impl<'a> Default for AcceptCall<'a> {
         Self {
             event_type: "realtime".to_string(),
             model: Some("gpt-realtime".to_string()),
+            audio: Default::default(),
             instructions: Default::default(),
             max_output_tokens: MaxTokens::Tokens(4096),
         }
@@ -142,6 +144,54 @@ impl<'a> Default for AcceptCall<'a> {
 impl<'a> OpenApiCall for AcceptCall<'a> {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/accept", API_ROOT, call_id)
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AudioConfig {
+    input: AudioInput,
+    output: AudioOutput,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AudioInput {
+    format: AudioFormat,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AudioOutput {
+    format: AudioFormat,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AudioFormat {
+    #[serde(rename = "type")]
+    codec: Codec,
+}
+
+#[derive(Debug)]
+enum Codec {
+    _Pcm,
+    Alaw,
+    _Ulaw,
+}
+
+impl Default for Codec {
+    fn default() -> Self {
+        Self::Alaw
+    }
+}
+
+impl Serialize for Codec {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Codec::_Pcm => serializer.serialize_str("audio/pcm"),
+            Codec::Alaw => serializer.serialize_str("audio/pcma"),
+            Codec::_Ulaw => serializer.serialize_str("audio/pcmu"),
+        }
     }
 }
 
