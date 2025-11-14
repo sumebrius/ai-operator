@@ -1,15 +1,16 @@
+use std::sync::Arc;
+
 use crate::{
     config::{API_ROOT, AppState, WS_URI},
     openai::webhook::RealtimeCallIncoming,
 };
-use bytes::Bytes;
 use reqwest::{Client, Response, header};
 use serde::{self, Serialize};
 use tokio::net::TcpStream;
 use tokio_stream::StreamExt;
 use tokio_tungstenite::{self, MaybeTlsStream, WebSocketStream, tungstenite};
 
-#[tracing::instrument(skip_all, fields(call.id = &call.get_id()))]
+#[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     info!("Handling call");
     let control_client = OpenAiControlSession::new(&state, &call);
@@ -35,18 +36,18 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 
 pub struct OpenAiControlSession {
     client: Client,
-    token: String,
+    token: Arc<String>,
     call_id: String,
-    prompt: Bytes,
+    prompt: Arc<String>,
 }
 
 impl OpenAiControlSession {
     pub fn new(state: &AppState, call: &RealtimeCallIncoming) -> Self {
-        let token = state.openai_key().to_string();
+        let token = state.openai_key();
 
         let mut headers = header::HeaderMap::new();
         let mut auth =
-            header::HeaderValue::try_from(format!("Bearer {}", token)).expect("Fucky API key");
+            header::HeaderValue::try_from(format!("Bearer {}", &token)).expect("Fucky API key");
         auth.set_sensitive(true);
         headers.insert(header::AUTHORIZATION, auth);
         let client = reqwest::ClientBuilder::new()
@@ -56,15 +57,14 @@ impl OpenAiControlSession {
 
         Self {
             client,
-            token,
-            call_id: call.get_id().to_string(),
+            token: state.openai_key(),
+            call_id: call.call_id().to_string(),
             prompt: state.prompt(),
         }
     }
 
     pub async fn accept(&self) -> Result<Response, reqwest::Error> {
-        self.execute(AcceptCall::with_prompt(self.prompt.clone()))
-            .await
+        self.execute(AcceptCall::with_prompt(&self.prompt)).await
     }
 
     async fn execute(&self, action: impl OpenApiCall) -> Result<Response, reqwest::Error> {
@@ -98,24 +98,24 @@ pub trait OpenApiCall: Serialize {
 }
 
 #[derive(Serialize, Debug)]
-pub struct AcceptCall {
+pub struct AcceptCall<'a> {
     #[serde(rename = "type")]
     event_type: String,
     model: Option<String>,
-    instructions: Option<Bytes>,
+    instructions: &'a str,
     max_output_tokens: MaxTokens,
 }
 
-impl AcceptCall {
-    fn with_prompt(prompt: Bytes) -> Self {
+impl<'a> AcceptCall<'a> {
+    fn with_prompt(prompt: &'a String) -> Self {
         Self {
-            instructions: Some(prompt),
+            instructions: prompt,
             ..Default::default()
         }
     }
 }
 
-impl Default for AcceptCall {
+impl<'a> Default for AcceptCall<'a> {
     fn default() -> Self {
         Self {
             event_type: "realtime".to_string(),
@@ -126,7 +126,7 @@ impl Default for AcceptCall {
     }
 }
 
-impl OpenApiCall for AcceptCall {
+impl<'a> OpenApiCall for AcceptCall<'a> {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/accept", API_ROOT, call_id)
     }

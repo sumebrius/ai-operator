@@ -15,6 +15,7 @@ use crate::{config::AppState, openai::control::handle_call};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RealtimeCallIncoming {
     id: String,
+    object: String,
     #[serde(rename = "type")]
     event_type: String,
     #[serde(with = "ts_seconds")]
@@ -26,11 +27,16 @@ impl RealtimeCallIncoming {
     pub fn get_id(&self) -> &str {
         &self.id
     }
+
+    pub fn call_id(&self) -> &str {
+        &self.data.call_id
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct RealtimeCallIncomingData {
     call_id: String,
+    #[serde(default)]
     sip_headers: Vec<SipHeader>,
 }
 
@@ -41,7 +47,7 @@ struct SipHeader {
 }
 
 pub async fn webhook(State(state): State<AppState>, Json(payload): Json<RealtimeCallIncoming>) {
-    info_span!("webhook", call.id = payload.get_id()).in_scope(|| info!("Webhook received"));
+    info_span!("webhook", webhook.id = payload.get_id()).in_scope(|| info!("Webhook received"));
     tokio::spawn(handle_call(state, payload));
 }
 
