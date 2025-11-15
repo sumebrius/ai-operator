@@ -81,11 +81,58 @@ struct AudioConfig {
 #[derive(Debug, Default, Serialize)]
 struct AudioInput {
     format: AudioFormat,
+    transcription: Transcription,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct Transcription {
+    language: String,
+    model: TranscriptionModel,
+    prompt: Option<String>,
+}
+
+#[allow(dead_code, non_camel_case_types)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum TranscriptionModel {
+    whisper_1,
+    gpt_4o_mini_transcribe,
+    gpt_4o_transcribe,
+    gpt_4o_transcribe_diarize,
+}
+
+impl Default for TranscriptionModel {
+    fn default() -> Self {
+        Self::gpt_4o_mini_transcribe
+    }
 }
 
 #[derive(Debug, Default, Serialize)]
 struct AudioOutput {
     format: AudioFormat,
+    voice: Voice,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Voice {
+    Alloy,
+    Ash,
+    Ballad,
+    Coral,
+    Echo,
+    Sage,
+    Shimmer,
+    Verse,
+    Marin,
+    Cedar,
+}
+
+impl Default for Voice {
+    fn default() -> Self {
+        Self::Marin
+    }
 }
 
 #[derive(Debug, Default, Serialize)]
