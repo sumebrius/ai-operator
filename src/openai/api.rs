@@ -87,11 +87,22 @@ struct AudioInput {
     transcription: Transcription,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Serialize)]
 struct Transcription {
     language: String,
     model: TranscriptionModel,
+    #[serde(skip_serializing_if = "Option::is_none")]
     prompt: Option<String>,
+}
+
+impl Default for Transcription {
+    fn default() -> Self {
+        Self {
+            language: "en".to_string(),
+            model: Default::default(),
+            prompt: Default::default(),
+        }
+    }
 }
 
 #[allow(dead_code, non_camel_case_types)]
