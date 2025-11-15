@@ -1,14 +1,17 @@
-use std::sync::Arc;
+use std::{fs::File, io::Write, sync::Arc};
 
 use crate::{
     config::{API_ROOT, AppState, WS_URI},
     openai::webhook::RealtimeCallIncoming,
 };
+use futures_util::{SinkExt, StreamExt};
 use reqwest::{Client, Response, header};
 use serde::{self, Serialize};
 use tokio::net::TcpStream;
-use tokio_stream::StreamExt;
-use tokio_tungstenite::{self, MaybeTlsStream, WebSocketStream, tungstenite};
+use tokio_tungstenite::{
+    self, MaybeTlsStream, WebSocketStream,
+    tungstenite::{self, Message},
+};
 
 #[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
@@ -21,16 +24,31 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     };
     info!("Call Answered");
 
-    let mut ws_client = match control_client.connect_ws().await {
-        Ok((client, _)) => client,
+    let (mut ws_write, mut ws_read) = match control_client.connect_ws().await {
+        Ok(client) => client.split(),
         Err(err) => {
             error!("Error starting websocket connection: {}", err);
             return;
         }
     };
 
-    while let Some(msg) = ws_client.next().await {
-        debug!("Message Received: {:?}", msg);
+    let mut log =
+        File::create(format!("call_logs/{}.jsonl", &call.call_id())).expect("Cant open log file");
+
+    let _ = ws_write.start_send_unpin(Message::text("Greet the user"));
+
+    while let Some(msg) = ws_read.next().await {
+        match msg {
+            Ok(msg) => match msg {
+                Message::Text(v) => {
+                    debug!("Message: {}", v.as_str());
+                    let _ = log.write_all(v.as_bytes());
+                    let _ = log.write_all(b"\n");
+                }
+                other => warn!("Non text WS message: {}", other),
+            },
+            Err(err) => error!("Fucky WS message: {:?}", err),
+        }
     }
 }
 
@@ -90,18 +108,13 @@ impl OpenAiControlSession {
 
     pub async fn connect_ws(
         &self,
-    ) -> Result<
-        (
-            WebSocketStream<MaybeTlsStream<TcpStream>>,
-            http::Response<Option<Vec<u8>>>,
-        ),
-        tungstenite::Error,
-    > {
+    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::Error> {
         let uri = http::Uri::try_from(format!("{}?call_id={}", WS_URI, self.call_id))
             .expect("Fucky WS URI or Header");
         let request = tungstenite::ClientRequestBuilder::new(uri)
             .with_header("Authorization", format!("Bearer {}", self.token));
-        tokio_tungstenite::connect_async(request).await
+        let (stream, _) = tokio_tungstenite::connect_async(request).await?;
+        Ok(stream)
     }
 }
 
