@@ -151,7 +151,7 @@ enum Codec {
 
 impl Default for Codec {
     fn default() -> Self {
-        Self::Ulaw
+        Self::Alaw
     }
 }
 
