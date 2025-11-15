@@ -181,10 +181,11 @@ struct AudioFormat {
     codec: Codec,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Codec {
-    _Pcm,
-    _Alaw,
+    Pcm,
+    Alaw,
     Ulaw,
 }
 
@@ -200,17 +201,18 @@ impl Serialize for Codec {
         S: serde::Serializer,
     {
         match self {
-            Codec::_Pcm => serializer.serialize_str("audio/pcm"),
-            Codec::_Alaw => serializer.serialize_str("audio/pcma"),
+            Codec::Pcm => serializer.serialize_str("audio/pcm"),
+            Codec::Alaw => serializer.serialize_str("audio/pcma"),
             Codec::Ulaw => serializer.serialize_str("audio/pcmu"),
         }
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum MaxTokens {
     Tokens(u16),
-    _Inf,
+    Inf,
 }
 
 impl Serialize for MaxTokens {
@@ -220,7 +222,7 @@ impl Serialize for MaxTokens {
     {
         match self {
             MaxTokens::Tokens(int) => serializer.serialize_u16(*int),
-            MaxTokens::_Inf => serializer.serialize_str("inf"),
+            MaxTokens::Inf => serializer.serialize_str("inf"),
         }
     }
 }
