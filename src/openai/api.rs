@@ -20,9 +20,12 @@ pub trait ApiClient {
         if !response.status().is_success() {
             let error = response.error_for_status_ref().unwrap_err();
             error!(
-                "{} response from OpenAI API: {:?}",
+                "{} response from OpenAI API:\n{}",
                 response.status(),
-                response.text().await
+                response
+                    .text()
+                    .await
+                    .unwrap_or_else(|err| format!("{:?}", err))
             );
             Err(error)
         } else {
