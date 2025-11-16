@@ -1,10 +1,10 @@
 use crate::config::WS_URI;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, stream::SplitStream};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{
-    self, MaybeTlsStream, WebSocketStream,
-    tungstenite::{self, Message},
-};
+use tokio_tungstenite::{self, MaybeTlsStream, WebSocketStream, tungstenite};
+
+pub mod client_event;
+pub mod server_event;
 
 pub trait WebsocketClient {
     fn get_token(&self) -> &str;
@@ -14,8 +14,8 @@ pub trait WebsocketClient {
         call_id: &str,
     ) -> Result<
         (
-            futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-            futures_util::stream::SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+            client_event::MessageSink,
+            SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
         ),
         tungstenite::Error,
     > {
@@ -24,6 +24,8 @@ pub trait WebsocketClient {
         let request = tungstenite::ClientRequestBuilder::new(uri)
             .with_header("Authorization", format!("Bearer {}", self.get_token()));
         let (stream, _) = tokio_tungstenite::connect_async(request).await?;
-        Ok(stream.split())
+
+        let (raw_tx, rx) = stream.split();
+        Ok((client_event::MessageSink::new(raw_tx), rx))
     }
 }

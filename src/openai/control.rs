@@ -1,12 +1,12 @@
 use std::{fs::File, io::Write, sync::Arc};
 
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use reqwest::{Client, Response, header};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::api::{self, ApiClient};
-use super::websocket::WebsocketClient;
+use super::websocket::{WebsocketClient, client_event};
 
 #[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
@@ -33,7 +33,10 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 
     let mut log = File::create(format!("call_logs/{}.jsonl", call_id)).expect("Cant open log file");
 
-    let _ = ws_write.start_send_unpin(Message::text("Greet the user"));
+    match ws_write.send(&client_event::ResponseCreate::new()).await {
+        Ok(_) => info!("User greeting initialised"),
+        Err(err) => error!("Error greeting user event: {:?}", err),
+    };
 
     while let Some(msg) = ws_read.next().await {
         match msg {
