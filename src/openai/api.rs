@@ -39,28 +39,30 @@ pub trait OpenApiCall: Serialize {
 }
 
 #[derive(Serialize, Debug)]
-pub struct AcceptCall<'a> {
-    #[serde(rename = "type")]
-    event_type: String,
-    model: Option<String>,
-    audio: AudioConfig,
-    instructions: &'a str,
-    max_output_tokens: MaxTokens,
+#[serde(rename_all = "lowercase", tag = "type")]
+pub enum AcceptCall<'a> {
+    Realtime {
+        model: Option<String>,
+        audio: AudioConfig,
+        instructions: &'a str,
+        max_output_tokens: MaxTokens,
+    },
 }
 
 impl<'a> AcceptCall<'a> {
     pub fn with_prompt(prompt: &'a String) -> Self {
-        Self {
+        Self::Realtime {
+            model: Some("gpt-realtime".to_string()),
+            audio: Default::default(),
             instructions: prompt,
-            ..Default::default()
+            max_output_tokens: MaxTokens::Tokens(4096),
         }
     }
 }
 
 impl<'a> Default for AcceptCall<'a> {
     fn default() -> Self {
-        Self {
-            event_type: "realtime".to_string(),
+        Self::Realtime {
             model: Some("gpt-realtime".to_string()),
             audio: Default::default(),
             instructions: Default::default(),
@@ -76,7 +78,7 @@ impl<'a> OpenApiCall for AcceptCall<'a> {
 }
 
 #[derive(Debug, Default, Serialize)]
-struct AudioConfig {
+pub struct AudioConfig {
     input: AudioInput,
     output: AudioOutput,
 }
@@ -149,42 +151,27 @@ impl Default for Voice {
     }
 }
 
-#[derive(Debug, Default, Serialize)]
-struct AudioFormat {
-    #[serde(rename = "type")]
-    codec: Codec,
-}
-
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
 #[allow(dead_code)]
-#[derive(Debug)]
-enum Codec {
-    Pcm,
+enum AudioFormat {
+    #[serde(rename = "audio/pcm")]
+    Pcm { rate: usize },
+    #[serde(rename = "audio/pcma")]
     Alaw,
+    #[serde(rename = "audio/pcmu")]
     Ulaw,
 }
 
-impl Default for Codec {
+impl Default for AudioFormat {
     fn default() -> Self {
         Self::Alaw
     }
 }
 
-impl Serialize for Codec {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Codec::Pcm => serializer.serialize_str("audio/pcm"),
-            Codec::Alaw => serializer.serialize_str("audio/pcma"),
-            Codec::Ulaw => serializer.serialize_str("audio/pcmu"),
-        }
-    }
-}
-
 #[allow(dead_code)]
 #[derive(Debug)]
-enum MaxTokens {
+pub enum MaxTokens {
     Tokens(u16),
     Inf,
 }

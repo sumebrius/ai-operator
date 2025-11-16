@@ -19,23 +19,8 @@ impl MessageSink {
 }
 
 #[derive(Serialize)]
-pub struct ResponseCreate {
-    #[serde(rename = "type")]
-    event_type: String,
-}
-
-impl ResponseCreate {
-    pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
-}
-
-impl Default for ResponseCreate {
-    fn default() -> Self {
-        Self {
-            event_type: "response.create".to_string(),
-        }
-    }
+#[serde(tag = "type")]
+pub enum Response {
+    #[serde(rename = "response.create")]
+    Create,
 }

@@ -33,7 +33,7 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 
     let mut log = File::create(format!("call_logs/{}.jsonl", call_id)).expect("Cant open log file");
 
-    match ws_write.send(&client_event::ResponseCreate::new()).await {
+    match ws_write.send(&client_event::Response::Create).await {
         Ok(_) => info!("User greeting initialised"),
         Err(err) => error!("Error greeting user event: {:?}", err),
     };
