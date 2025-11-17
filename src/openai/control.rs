@@ -1,5 +1,6 @@
 use std::{fs::File, io::Write, sync::Arc};
 
+use crate::openai::websocket::server_event::ServerEvent;
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 use futures_util::StreamExt;
 use reqwest::{Client, Response, header};
@@ -39,16 +40,28 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     };
 
     while let Some(msg) = ws_read.next().await {
-        match msg {
-            Ok(msg) => match msg {
-                Message::Text(v) => {
-                    debug!("Message: {}", v.as_str());
-                    let _ = log.write_all(v.as_bytes());
-                    let _ = log.write_all(b"\n");
-                }
-                other => warn!("Non text WS message: {}", other),
-            },
-            Err(err) => error!("Fucky WS message: {:?}", err),
+        let msg = match msg {
+            Ok(msg) => msg,
+            Err(err) => {
+                error!("Can't retrieve WS message: {:?}", err);
+                continue;
+            }
+        };
+        let event = match ServerEvent::try_from(&msg) {
+            Ok(event) => event,
+            Err(err) => {
+                error!("Fucky WS message: {:?}", err);
+                continue;
+            }
+        };
+        if event.ignore() {
+            continue;
+        }
+
+        debug!("Server Event: {:?}", event);
+        if let Message::Text(msg_bytes) = msg {
+            let _ = log.write_all(msg_bytes.as_bytes());
+            let _ = log.write_all(b"\n");
         }
     }
 }
