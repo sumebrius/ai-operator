@@ -1,7 +1,9 @@
+use std::time::SystemTime;
 use std::{fs::File, io::Write, sync::Arc};
 
 use crate::openai::websocket::server_event::ServerEvent;
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
+use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use reqwest::{Client, Response, header};
 use tokio_tungstenite::tungstenite::Message;
@@ -32,7 +34,13 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
         }
     };
 
-    let mut log = File::create(format!("call_logs/{}.jsonl", call_id)).expect("Cant open log file");
+    let now: DateTime<Utc> = SystemTime::now().into();
+    let mut log = File::create(format!(
+        "call_logs/{}_{}.jsonl",
+        now.naive_local().format("%Y-%m-%dT%H:%M:%S"),
+        call_id
+    ))
+    .expect("Cant open log file");
 
     match ws_write.send(&client_event::Response::Create).await {
         Ok(_) => info!("User greeting initialised"),
