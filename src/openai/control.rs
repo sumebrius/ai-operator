@@ -59,6 +59,10 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
             Ok(event) => event,
             Err(err) => {
                 error!("Fucky WS message: {:?}", err);
+                if let Message::Text(msg_bytes) = msg {
+                    let _ = log.write_all(msg_bytes.as_bytes());
+                    let _ = log.write_all(b"\n");
+                }
                 continue;
             }
         };
