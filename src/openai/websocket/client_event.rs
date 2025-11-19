@@ -24,3 +24,36 @@ pub enum Response {
     #[serde(rename = "response.create")]
     Create,
 }
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+pub enum Conversation {
+    #[serde(rename = "conversation.item.create")]
+    ItemCreate(ConversationItem),
+}
+
+#[derive(Serialize)]
+pub struct ConversationItem {
+    item: ConversationItemType,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+pub enum ConversationItemType {
+    #[serde(rename = "function_call_output")]
+    FunctionCallOutput(FunctionCallOutput),
+}
+
+#[derive(Serialize)]
+pub struct FunctionCallOutput {
+    pub output: String,
+    pub call_id: String,
+}
+
+impl From<FunctionCallOutput> for Conversation {
+    fn from(value: FunctionCallOutput) -> Self {
+        Conversation::ItemCreate(ConversationItem {
+            item: ConversationItemType::FunctionCallOutput(value),
+        })
+    }
+}

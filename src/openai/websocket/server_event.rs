@@ -1,15 +1,17 @@
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::openai::{tools::Tool, websocket::client_event};
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerEvent {
     #[serde(rename = "error")]
     Error(Error),
     #[serde(rename = "session.created")]
-    SessionCreated(SessionCreated),
+    SessionCreated,
     #[serde(rename = "session.updated")]
-    SessionUpdated(SessionUpdated),
+    SessionUpdated,
     #[serde(rename = "conversation.item.added")]
     ConversationItemAdded,
     #[serde(rename = "conversation.item.done")]
@@ -47,7 +49,7 @@ pub enum ServerEvent {
     #[serde(rename = "response.created")]
     ResponseCreated,
     #[serde(rename = "response.done")]
-    ResponseDone,
+    ResponseDone(ResponseDone),
     #[serde(rename = "response.output_item.added")]
     ResponseOutputItemAdded,
     #[serde(rename = "response.output_item.done")]
@@ -100,6 +102,7 @@ impl ServerEvent {
                 | Self::ResponseOutputAudioDelta
                 | Self::ResponseOutputAudioTranscriptDelta
                 | Self::ConversationItemInputAudioTranscriptionDelta
+                | Self::ResponseFunctionCallArgumentsDelta
         )
     }
 }
@@ -140,13 +143,67 @@ pub struct ErrorDetail {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct SessionCreated {
+pub struct ResponseDone {
     event_id: String,
+    response: Response,
+}
+
+impl ResponseDone {
+    pub fn function_calls(&self) -> Vec<&FunctionCall> {
+        self.response
+            .output
+            .iter()
+            .filter_map(|item| match item {
+                ResponseOutput::FunctionCall(item) => Some(item),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct SessionUpdated {
-    event_id: String,
+pub struct Response {
+    output: Vec<ResponseOutput>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum ResponseOutput {
+    #[serde(rename = "message")]
+    Message,
+    #[serde(rename = "function_call")]
+    FunctionCall(FunctionCall),
+    #[serde(rename = "function_call_output")]
+    FunctionCallOutput,
+    #[serde(rename = "mcp_approval_response")]
+    McpApproval,
+    #[serde(rename = "mcp_list_tools")]
+    McpList,
+    #[serde(rename = "mcp_call")]
+    McpCall,
+    #[serde(rename = "mcp_approval_request")]
+    McpRequest,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FunctionCall {
+    id: String,
+    call_id: String,
+    #[serde(flatten)]
+    tool: Tool,
+    arguments: String,
+}
+
+impl FunctionCall {
+    pub fn run(&self) -> client_event::FunctionCallOutput {
+        let output = self.tool.run(&self.arguments);
+        let call_id = self.call_id.clone();
+        client_event::FunctionCallOutput { output, call_id }
+    }
+
+    pub fn name(&self) -> String {
+        format!("{:?}", self.tool)
+    }
 }
 
 // #[derive(Debug, Deserialize, Serialize)]

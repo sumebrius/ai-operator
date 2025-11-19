@@ -1,4 +1,4 @@
-use crate::config::API_ROOT;
+use crate::{config::API_ROOT, openai::tools::Tool};
 use reqwest::{Client, Response};
 use serde::{self, Serialize};
 
@@ -45,6 +45,7 @@ pub enum AcceptCall<'a> {
         model: Option<String>,
         audio: AudioConfig,
         instructions: &'a str,
+        tools: Vec<Tool>,
         max_output_tokens: MaxTokens,
     },
 }
@@ -55,6 +56,7 @@ impl<'a> AcceptCall<'a> {
             model: Some("gpt-realtime".to_string()),
             audio: Default::default(),
             instructions: prompt,
+            tools: Tool::all(),
             max_output_tokens: MaxTokens::Tokens(4096),
         }
     }
@@ -66,6 +68,7 @@ impl<'a> Default for AcceptCall<'a> {
             model: Some("gpt-realtime".to_string()),
             audio: Default::default(),
             instructions: Default::default(),
+            tools: Tool::all(),
             max_output_tokens: MaxTokens::Tokens(4096),
         }
     }

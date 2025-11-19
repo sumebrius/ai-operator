@@ -1,15 +1,14 @@
 use std::time::SystemTime;
 use std::{fs::File, io::Write, sync::Arc};
 
-use crate::openai::websocket::server_event::ServerEvent;
-use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use reqwest::{Client, Response, header};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::api::{self, ApiClient};
-use super::websocket::{WebsocketClient, client_event};
+use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent};
+use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 
 #[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
@@ -58,7 +57,7 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
         let event = match ServerEvent::try_from(&msg) {
             Ok(event) => event,
             Err(err) => {
-                error!("Fucky WS message: {:?}", err);
+                error!("Fucky WS message: {:#?}", err);
                 if let Message::Text(msg_bytes) = msg {
                     let _ = log.write_all(msg_bytes.as_bytes());
                     let _ = log.write_all(b"\n");
@@ -75,6 +74,31 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
             let _ = log.write_all(msg_bytes.as_bytes());
             let _ = log.write_all(b"\n");
         }
+
+        if let ServerEvent::ResponseDone(response) = event {
+            let function_calls = response.function_calls();
+            if function_calls.is_empty() {
+                continue;
+            }
+
+            for call in function_calls {
+                let call_name = call.name();
+                let result = call.run();
+                info!(
+                    "Tool call {} {} results: {}",
+                    call_name, result.call_id, result.output
+                );
+
+                let message: client_event::Conversation = result.into();
+                if let Err(err) = ws_write.send(&message).await {
+                    error!("Error sending tool response: {:?}", err)
+                }
+            }
+            match ws_write.send(&client_event::Response::Create).await {
+                Ok(_) => info!("Response started"),
+                Err(err) => error!("Error starting response event: {:?}", err),
+            };
+        };
     }
 }
 
