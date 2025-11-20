@@ -1,6 +1,6 @@
 use crate::{config::API_ROOT, openai::tools::Tool};
 use reqwest::{Client, Response};
-use serde::{self, Serialize};
+use serde::{Serialize, Serializer};
 
 pub trait ApiClient {
     fn client(&self) -> &Client;
@@ -41,30 +41,38 @@ pub trait OpenApiCall: Serialize {
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum AcceptCall<'a> {
-    Realtime {
-        model: Option<String>,
-        audio: AudioConfig,
-        instructions: &'a str,
-        tools: Vec<Tool>,
-        max_output_tokens: MaxTokens,
-    },
+    Realtime(Realtime<'a>),
 }
 
 impl<'a> AcceptCall<'a> {
-    pub fn with_prompt(prompt: &'a String) -> Self {
-        Self::Realtime {
-            model: Some("gpt-realtime".to_string()),
-            audio: Default::default(),
+    pub fn new(prompt: &'a String) -> Self {
+        Self::Realtime(Realtime {
             instructions: prompt,
-            tools: Tool::all(),
-            max_output_tokens: MaxTokens::Tokens(4096),
-        }
+            ..Default::default()
+        })
+    }
+
+    pub fn transcribe_caller(mut self) -> Self {
+        let Self::Realtime(ref mut rt) = self;
+        rt.audio.input.transcription = Some(Transcription {
+            ..Default::default()
+        });
+        self
     }
 }
 
-impl<'a> Default for AcceptCall<'a> {
+#[derive(Serialize, Debug)]
+pub struct Realtime<'a> {
+    model: Option<String>,
+    audio: AudioConfig,
+    instructions: &'a str,
+    tools: Vec<Tool>,
+    max_output_tokens: MaxTokens,
+}
+
+impl<'a> Default for Realtime<'a> {
     fn default() -> Self {
-        Self::Realtime {
+        Self {
             model: Some("gpt-realtime".to_string()),
             audio: Default::default(),
             instructions: Default::default(),
@@ -89,7 +97,8 @@ pub struct AudioConfig {
 #[derive(Debug, Default, Serialize)]
 struct AudioInput {
     format: AudioFormat,
-    transcription: Transcription,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transcription: Option<Transcription>,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,7 +191,7 @@ pub enum MaxTokens {
 impl Serialize for MaxTokens {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         match self {
             MaxTokens::Tokens(int) => serializer.serialize_u16(*int),

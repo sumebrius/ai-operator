@@ -6,6 +6,7 @@ pub struct AppState {
     prompt: Arc<String>,
     openai_key: Arc<String>,
     webhook: Option<Arc<Webhook>>,
+    transcribe_caller: bool,
 }
 
 impl AppState {
@@ -17,11 +18,13 @@ impl AppState {
             .ok()
             .map(|secret| Webhook::new(&secret).expect("Bad Webhook Key"))
             .map(Arc::new);
+        let transcribe_caller = env::var("TRANSCRIBE_CALLER").is_ok();
 
         Self {
             prompt,
             openai_key,
             webhook,
+            transcribe_caller,
         }
     }
 
@@ -35,5 +38,9 @@ impl AppState {
 
     pub fn webhook(&self) -> Option<Arc<Webhook>> {
         self.webhook.clone()
+    }
+
+    pub fn transcribe_caller(&self) -> bool {
+        self.transcribe_caller
     }
 }

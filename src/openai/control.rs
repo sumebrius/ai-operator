@@ -106,6 +106,7 @@ pub struct OpenAiControlSession {
     api_client: Client,
     token: Arc<String>,
     prompt: Arc<String>,
+    transcribe_caller: bool,
 }
 
 impl OpenAiControlSession {
@@ -126,12 +127,17 @@ impl OpenAiControlSession {
             api_client: client,
             token: state.openai_key(),
             prompt: state.prompt(),
+            transcribe_caller: state.transcribe_caller(),
         }
     }
 
     pub async fn accept(&self, call_id: &str) -> Result<Response, reqwest::Error> {
-        self.execute(api::AcceptCall::with_prompt(&self.prompt), call_id)
-            .await
+        let payload = if self.transcribe_caller {
+            api::AcceptCall::new(&self.prompt).transcribe_caller()
+        } else {
+            api::AcceptCall::new(&self.prompt)
+        };
+        self.execute(payload, call_id).await
     }
 }
 
