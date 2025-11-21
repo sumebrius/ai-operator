@@ -249,7 +249,7 @@ pub struct Response {
 #[serde(tag = "type")]
 pub enum ResponseOutput {
     #[serde(rename = "message")]
-    Message,
+    Message(ResponseMessage),
     #[serde(rename = "function_call")]
     FunctionCall(FunctionCall),
     #[serde(rename = "function_call_output")]
@@ -262,6 +262,39 @@ pub enum ResponseOutput {
     McpCall,
     #[serde(rename = "mcp_approval_request")]
     McpRequest,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResponseMessage {
+    role: Role,
+    status: String,
+    content: Vec<ResponseContent>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResponseContent {
+    #[serde(rename = "type")]
+    content_type: ContentType,
+    text: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentType {
+    Message,
+    InputText,
+    InputAudio,
+    InputImage,
+    OutputText,
+    OutputAudio,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
