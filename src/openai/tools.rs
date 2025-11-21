@@ -50,7 +50,7 @@ impl FunctionTool for ValidatePhoneNumber {
 
     fn execute(&self, args: Self::Args<'_>) -> Self::Return {
         info!("ValidatePhoneNumber called with {:#?}", args);
-        let valid = true;
+        let valid = args.digits.len() > 4;
         ValidateResult { valid }
     }
 }
