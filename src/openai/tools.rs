@@ -19,74 +19,112 @@ pub trait FunctionTool {
             .unwrap_or_else(|err| serde_json::json!({"error": format!("{:?}", err)}).to_string())
     }
 
-    fn description(&self) -> &str {
-        Self::DESCRIPTION
-    }
-    fn parameters(&self) -> Schema {
+    fn parameters() -> Schema {
         schema_for!(Self::Args<'_>)
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ValidateResult {
+    valid: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ValidatePhoneNumberArgs {
+    digits: Vec<usize>,
+}
+
 #[derive(Debug, Deserialize)]
-#[serde(tag = "name")]
-pub enum Tool {
-    ToolA,
-}
+pub struct ValidatePhoneNumber;
 
-impl Tool {
-    pub fn get_tool(&self) -> impl FunctionTool {
-        match self {
-            Tool::ToolA => ToolA,
-        }
-    }
-    pub fn run(&self, payload: &str) -> String {
-        self.get_tool().run(payload)
-    }
+impl FunctionTool for ValidatePhoneNumber {
+    type Args<'a> = ValidatePhoneNumberArgs;
+    type Return = ValidateResult;
+    const DESCRIPTION: &str = r#"Validate a phone number is valid and can be transferred to.
+    Parameters:
+        digits(array[int]): An array of individual digits of the phone number to check
+    Returns:
+        valid(bool): If the number is valid and can be transferred to.
+        error(string): If there was an error with the function call itself. 
+    "#;
 
-    pub fn all() -> Vec<Self> {
-        vec![Self::ToolA]
-    }
-}
-
-impl Serialize for Tool {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let tool = self.get_tool();
-        let name = match self {
-            Tool::ToolA => "ToolA",
-        };
-
-        let mut ser = serializer.serialize_map(Some(4))?;
-        ser.serialize_entry("type", "function")?;
-        ser.serialize_entry("name", name)?;
-        ser.serialize_entry("description", tool.description())?;
-        ser.serialize_entry("parameters", &tool.parameters())?;
-        ser.end()
+    fn execute(&self, args: Self::Args<'_>) -> Self::Return {
+        info!("ValidatePhoneNumber called with {:#?}", args);
+        let valid = true;
+        ValidateResult { valid }
     }
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ToolArgs {
-    phrase: String,
-    sentiment: String,
-    digits: Option<Vec<usize>>,
+pub struct ValidateContactArgs {
+    contact: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ToolA;
+pub struct ValidateContact;
 
-impl FunctionTool for ToolA {
-    type Args<'a> = ToolArgs;
-    type Return = usize;
-    const DESCRIPTION: &str = r#"Use this tool if the user says the magic word 'chicken'.
-    If they say any digits after saying chicken, include this in the function call. Ensure digits are passed as an array of individual single digits.
-    Give the user the response directly.
+impl FunctionTool for ValidateContact {
+    type Args<'a> = ValidateContactArgs;
+    type Return = ValidateResult;
+    const DESCRIPTION: &str = r#"Validate a contact is known and can be transferred to.
+    Parameters:
+        contact(array[int]): An array of contact names to check.
+    Returns:
+        valid(bool): If the number is valid and can be transferred to.
+        error(string): If there was an error with the function call itself. 
     "#;
 
     fn execute(&self, args: Self::Args<'_>) -> Self::Return {
-        info!("Tool called with {:#?}", args);
-        69
+        info!("ValidateContact called with {:#?}", args);
+        let valid = true;
+        ValidateResult { valid }
     }
 }
+
+macro_rules! build_tools {
+    ( $( $tool:ident ),+ ) => {
+
+        #[derive(Debug, Deserialize)]
+        #[serde(tag = "name")]
+        pub enum Tool {
+            $(
+                $tool,
+            )*
+        }
+
+        impl Tool {
+            pub fn run(&self, payload: &str) -> String {
+                match self {
+                    $(Self::$tool => $tool.run(payload),)*
+                }
+            }
+
+            pub fn all() -> Vec<Self> {
+                vec![$(Tool::$tool, )*]
+            }
+        }
+
+        impl Serialize for Tool {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let (name, description, parameters) = match self {
+                    $(Tool::$tool => {
+                        (stringify!($tool), $tool::DESCRIPTION, &$tool::parameters())
+                    },)*
+                };
+
+                let mut ser = serializer.serialize_map(Some(4))?;
+                ser.serialize_entry("type", "function")?;
+                ser.serialize_entry("name", name)?;
+                ser.serialize_entry("description", description)?;
+                ser.serialize_entry("parameters", parameters)?;
+                ser.end()
+            }
+        }
+
+    };
+}
+
+build_tools!(ValidatePhoneNumber, ValidateContact);
