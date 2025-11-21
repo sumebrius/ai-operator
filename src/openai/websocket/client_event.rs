@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use futures_util::{SinkExt, stream::SplitSink};
 use serde::Serialize;
 use serde_json::to_string;
@@ -12,9 +14,16 @@ impl MessageSink {
         Self(sink)
     }
 
-    pub async fn send(&mut self, message: &impl Serialize) -> Result<(), tungstenite::Error> {
+    pub async fn send<S: Serialize + Display>(
+        &mut self,
+        message: &S,
+    ) -> Result<(), tungstenite::Error> {
+        info!("Sending client event: {}", message);
         let item = tungstenite::Message::text(to_string(message).expect("Bad JSON serialisation"));
-        self.0.send(item).await
+        self.0
+            .send(item)
+            .await
+            .inspect_err(|err| error!("Error sending event: {:?}", err))
     }
 }
 
@@ -24,6 +33,11 @@ pub enum Response {
     #[serde(rename = "response.create")]
     Create,
 }
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Create Response")
+    }
+}
 
 #[derive(Serialize)]
 #[serde(tag = "type")]
@@ -31,10 +45,30 @@ pub enum Conversation {
     #[serde(rename = "conversation.item.create")]
     ItemCreate(ConversationItem),
 }
+impl Display for Conversation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Conversation::ItemCreate(item) => item.fmt(f),
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct ConversationItem {
     item: ConversationItemType,
+}
+impl Display for ConversationItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.item {
+            ConversationItemType::FunctionCallOutput(output) => {
+                write!(
+                    f,
+                    "Function response for call {}: {}",
+                    output.call_id, output.output
+                )
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]

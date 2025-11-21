@@ -1,10 +1,6 @@
-use std::time::SystemTime;
-use std::{fs::File, io::Write, sync::Arc};
+use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use futures_util::StreamExt;
 use reqwest::{Client, Response, header};
-use tokio_tungstenite::tungstenite::Message;
 
 use super::api::{self, ApiClient};
 use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent};
@@ -16,65 +12,19 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     let control_client = OpenAiControlSession::new(&state);
     let call_id = call.call_id();
 
-    if let Err(err) = control_client.accept(call_id).await {
-        error!("Error response accepting call: {}", err);
+    if control_client.accept(call_id).await.is_err() {
         return;
     };
     info!("Call Answered");
 
     let (mut ws_write, mut ws_read) = match control_client.connect_ws(call_id).await {
-        Ok(clients) => {
-            info!("Websocket control session initialised");
-            clients
-        }
-        Err(err) => {
-            error!("Error starting websocket connection: {}", err);
-            return;
-        }
+        Ok(clients) => clients,
+        Err(_) => return,
     };
 
-    let now: DateTime<Utc> = SystemTime::now().into();
-    let mut log = File::create(format!(
-        "call_logs/{}_{}.jsonl",
-        now.naive_local().format("%Y-%m-%dT%H:%M:%S"),
-        call_id
-    ))
-    .expect("Cant open log file");
+    let _ = ws_write.send(&client_event::Response::Create).await;
 
-    match ws_write.send(&client_event::Response::Create).await {
-        Ok(_) => info!("User greeting initialised"),
-        Err(err) => error!("Error greeting user event: {:?}", err),
-    };
-
-    while let Some(msg) = ws_read.next().await {
-        let msg = match msg {
-            Ok(msg) => msg,
-            Err(err) => {
-                error!("Can't retrieve WS message: {:?}", err);
-                continue;
-            }
-        };
-        let event = match ServerEvent::try_from(&msg) {
-            Ok(event) => event,
-            Err(err) => {
-                error!("Fucky WS message: {:#?}", err);
-                if let Message::Text(msg_bytes) = msg {
-                    let _ = log.write_all(msg_bytes.as_bytes());
-                    let _ = log.write_all(b"\n");
-                }
-                continue;
-            }
-        };
-        if event.ignore() {
-            continue;
-        }
-
-        debug!("Server Event: {:?}", event);
-        if let Message::Text(msg_bytes) = msg {
-            let _ = log.write_all(msg_bytes.as_bytes());
-            let _ = log.write_all(b"\n");
-        }
-
+    while let Some(event) = ws_read.get_event().await {
         if let ServerEvent::ResponseDone(response) = event {
             let function_calls = response.function_calls();
             if function_calls.is_empty() {
@@ -90,14 +40,9 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
                 );
 
                 let message: client_event::Conversation = result.into();
-                if let Err(err) = ws_write.send(&message).await {
-                    error!("Error sending tool response: {:?}", err)
-                }
+                let _ = ws_write.send(&message).await;
             }
-            match ws_write.send(&client_event::Response::Create).await {
-                Ok(_) => info!("Response started"),
-                Err(err) => error!("Error starting response event: {:?}", err),
-            };
+            let _ = ws_write.send(&client_event::Response::Create).await;
         };
     }
 }
@@ -137,7 +82,9 @@ impl OpenAiControlSession {
         } else {
             api::AcceptCall::new(&self.prompt)
         };
-        self.execute(payload, call_id).await
+        self.execute(payload, call_id).await.inspect_err(|err| {
+            error!("Error response accepting call: {}", err);
+        })
     }
 }
 

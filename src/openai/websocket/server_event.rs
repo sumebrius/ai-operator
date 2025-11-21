@@ -1,7 +1,86 @@
+use std::{fs::File, io::Write, time::SystemTime};
+
+use chrono::{DateTime, Utc};
+use futures_util::{StreamExt, stream::SplitStream};
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::net::TcpStream;
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream,
+    tungstenite::{self, Message},
+};
 
 use crate::openai::{tools::Tool, websocket::client_event};
+
+type WsSource = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+pub struct MessageSource {
+    file: File,
+    stream: WsSource,
+}
+
+impl MessageSource {
+    pub fn new(stream: WsSource, call_id: &str) -> Self {
+        let now: DateTime<Utc> = SystemTime::now().into();
+        let file = File::create(format!(
+            "call_logs/{}_{}.jsonl",
+            now.naive_local().format("%Y-%m-%dT%H:%M:%S"),
+            call_id
+        ))
+        .expect("Cant open log file");
+
+        Self { file, stream }
+    }
+
+    pub async fn get_event(&mut self) -> Option<ServerEvent> {
+        loop {
+            match self.stream.next().await {
+                Some(msg) => match self.handle_event(msg) {
+                    Some(event) => return Some(event),
+                    None => continue,
+                },
+                None => return None,
+            }
+        }
+    }
+
+    fn handle_event(
+        &mut self,
+        msg: Result<Message, tungstenite::error::Error>,
+    ) -> Option<ServerEvent> {
+        let msg = match msg {
+            Ok(msg) => msg,
+            Err(err) => {
+                error!("Can't retrieve WS message: {:?}", err);
+                return None;
+            }
+        };
+        let event = match ServerEvent::try_from(&msg) {
+            Ok(event) => event,
+            Err(err) => {
+                error!("Fucky WS message: {:#?}", err);
+                self.log(msg);
+                return None;
+            }
+        };
+        if event.ignore() {
+            return None;
+        }
+
+        debug!("Server Event: {:?}", event);
+        self.log(msg);
+        Some(event)
+    }
+
+    fn log(&mut self, msg: Message) {
+        if let Message::Text(msg_bytes) = msg {
+            self.file
+                .write_all(msg_bytes.as_bytes())
+                .unwrap_or_else(|err| error!("Unable to log message to file: {:?}", err));
+            self.file
+                .write_all(b"\n")
+                .unwrap_or_else(|err| error!("Unable to log message to file: {:?}", err));
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
