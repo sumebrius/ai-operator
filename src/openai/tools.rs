@@ -31,6 +31,7 @@ pub struct ValidateResult {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidatePhoneNumberArgs {
+    #[schemars(description = "An array of individual digits of the phone number to check")]
     digits: Vec<usize>,
 }
 
@@ -41,8 +42,6 @@ impl FunctionTool for ValidatePhoneNumber {
     type Args<'a> = ValidatePhoneNumberArgs;
     type Return = ValidateResult;
     const DESCRIPTION: &str = r#"Validate a phone number is valid and can be transferred to.
-    Parameters:
-        digits(array[int]): An array of individual digits of the phone number to check
     Returns:
         valid(bool): If the number is valid and can be transferred to.
         error(string): If there was an error with the function call itself. 
@@ -57,6 +56,7 @@ impl FunctionTool for ValidatePhoneNumber {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidateContactArgs {
+    #[schemars(description = "An array of contact names to check")]
     contact: Vec<String>,
 }
 
@@ -67,8 +67,6 @@ impl FunctionTool for ValidateContact {
     type Args<'a> = ValidateContactArgs;
     type Return = ValidateResult;
     const DESCRIPTION: &str = r#"Validate a contact is known and can be transferred to.
-    Parameters:
-        contact(array[int]): An array of contact names to check.
     Returns:
         valid(bool): If the number is valid and can be transferred to.
         error(string): If there was an error with the function call itself. 
