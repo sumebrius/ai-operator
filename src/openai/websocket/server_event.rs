@@ -9,7 +9,10 @@ use tokio_tungstenite::{
     tungstenite::{self, Message},
 };
 
-use crate::openai::{tools::Tool, websocket::client_event};
+use crate::openai::{
+    tools::{SideEffect, Tool},
+    websocket::client_event,
+};
 
 type WsSource = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 pub struct MessageSource {
@@ -311,10 +314,14 @@ pub struct FunctionCall {
 }
 
 impl FunctionCall {
-    pub fn run(&self) -> client_event::FunctionCallOutput {
-        let output = self.tool.run(&self.arguments);
+    pub fn run(&self) -> (client_event::FunctionCallOutput, SideEffect) {
+        let result = self.tool.run(&self.arguments);
         let call_id = self.call_id.clone();
-        client_event::FunctionCallOutput { output, call_id }
+        let output = result.output;
+        (
+            client_event::FunctionCallOutput { output, call_id },
+            result.side_effect,
+        )
     }
 
     pub fn name(&self) -> String {

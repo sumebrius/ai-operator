@@ -200,6 +200,24 @@ impl Serialize for MaxTokens {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct ReferCall {
+    target_uri: String,
+}
+
+impl ReferCall {
+    pub fn new(target: &str) -> Self {
+        let target_uri = target.to_string();
+        Self { target_uri }
+    }
+}
+
+impl OpenApiCall for ReferCall {
+    fn get_url(&self, call_id: &str) -> String {
+        format!("{}/{}/refer", API_ROOT, call_id)
+    }
+}
+
 #[derive(Serialize, Debug)]
 pub struct _RejectCall {
     status_code: u16,
@@ -220,9 +238,9 @@ impl OpenApiCall for _RejectCall {
 }
 
 #[derive(Serialize, Debug)]
-pub struct _Hangup {}
+pub struct Hangup;
 
-impl OpenApiCall for _Hangup {
+impl OpenApiCall for Hangup {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/hangup", API_ROOT, call_id)
     }

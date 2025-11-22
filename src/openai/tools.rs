@@ -6,22 +6,47 @@ pub trait FunctionTool {
     type Return: Serialize;
     const DESCRIPTION: &str;
 
-    fn execute(&self, args: Self::Args<'_>) -> Self::Return;
+    fn execute(&self, args: Self::Args<'_>) -> (Self::Return, SideEffect);
 
-    fn run(&self, payload: &str) -> String {
-        // Deserialise args
+    fn run(&self, payload: &str) -> ToolResult {
         serde_json::from_str::<Self::Args<'_>>(payload)
-            // Execute
-            .map(|args| self.execute(args))
-            // Serialise result
-            .and_then(|result| serde_json::to_string(&result))
-            // Serialise any serde errors
-            .unwrap_or_else(|err| serde_json::json!({"error": format!("{:?}", err)}).to_string())
+            .map(|args| {
+                let (result, side_effect) = self.execute(args);
+                match serde_json::to_string(&result) {
+                    Ok(output) => ToolResult {
+                        output,
+                        side_effect,
+                    },
+                    Err(err) => err.into(),
+                }
+            })
+            .unwrap_or_else(|err| err.into())
     }
 
     fn parameters() -> Schema {
         schema_for!(Self::Args<'_>)
     }
+}
+
+pub struct ToolResult {
+    pub output: String,
+    pub side_effect: SideEffect,
+}
+
+impl From<serde_json::Error> for ToolResult {
+    fn from(value: serde_json::Error) -> Self {
+        let output = serde_json::json!({"error": format!("{:?}", value)}).to_string();
+        Self {
+            output,
+            side_effect: SideEffect::Noop,
+        }
+    }
+}
+
+pub enum SideEffect {
+    Noop,
+    Transfer(String),
+    Terminate,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -47,10 +72,10 @@ impl FunctionTool for ValidatePhoneNumber {
         error(string): If there was an error with the function call itself. 
     "#;
 
-    fn execute(&self, args: Self::Args<'_>) -> Self::Return {
+    fn execute(&self, args: Self::Args<'_>) -> (Self::Return, SideEffect) {
         info!("ValidatePhoneNumber called with {:#?}", args);
         let valid = args.digits.len() > 4;
-        ValidateResult { valid }
+        (ValidateResult { valid }, SideEffect::Noop)
     }
 }
 
@@ -72,10 +97,10 @@ impl FunctionTool for ValidateContact {
         error(string): If there was an error with the function call itself. 
     "#;
 
-    fn execute(&self, args: Self::Args<'_>) -> Self::Return {
+    fn execute(&self, args: Self::Args<'_>) -> (Self::Return, SideEffect) {
         info!("ValidateContact called with {:#?}", args);
         let valid = true;
-        ValidateResult { valid }
+        (ValidateResult { valid }, SideEffect::Noop)
     }
 }
 
@@ -85,13 +110,11 @@ macro_rules! build_tools {
         #[derive(Debug, Deserialize)]
         #[serde(tag = "name")]
         pub enum Tool {
-            $(
-                $tool,
-            )*
+            $($tool,)*
         }
 
         impl Tool {
-            pub fn run(&self, payload: &str) -> String {
+            pub fn run(&self, payload: &str) -> ToolResult {
                 match self {
                     $(Self::$tool => $tool.run(payload),)*
                 }

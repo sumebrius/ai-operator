@@ -5,15 +5,15 @@ use tracing::Instrument;
 
 use super::api::{self, ApiClient};
 use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent};
+use crate::openai::tools::SideEffect;
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 
 #[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     info!("Handling call");
-    let control_client = OpenAiControlSession::new(&state);
     let call_id = call.call_id();
-
-    if control_client.accept(call_id).await.is_err() {
+    let control_client = OpenAiControlSession::new(&state, call_id);
+    if control_client.accept().await.is_err() {
         return;
     };
     info!("Call Answered");
@@ -44,12 +44,17 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
                 );
 
                 let fn_span_guard = fn_span.enter();
-                let result = call.run();
+                let (result, side_effect) = call.run();
                 info!("Tool call results: {}", result.output);
                 drop(fn_span_guard);
 
                 let message: client_event::Conversation = result.into();
                 let _ = ws_write.send(&message).instrument(fn_span).await;
+
+                let terminal = control_client.handle_effect(side_effect).await;
+                if terminal {
+                    return;
+                }
             }
             let _ = ws_write
                 .send(&client_event::Response::Create)
@@ -60,6 +65,7 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 }
 
 pub struct OpenAiControlSession {
+    call_id: String,
     api_client: Client,
     token: Arc<String>,
     prompt: Arc<String>,
@@ -67,7 +73,7 @@ pub struct OpenAiControlSession {
 }
 
 impl OpenAiControlSession {
-    pub fn new(state: &AppState) -> Self {
+    pub fn new(state: &AppState, call_id: &str) -> Self {
         let token = state.openai_key();
 
         let mut headers = header::HeaderMap::new();
@@ -81,6 +87,7 @@ impl OpenAiControlSession {
             .expect("Fucky Client");
 
         Self {
+            call_id: call_id.to_string(),
             api_client: client,
             token: state.openai_key(),
             prompt: state.prompt(),
@@ -88,15 +95,48 @@ impl OpenAiControlSession {
         }
     }
 
-    pub async fn accept(&self, call_id: &str) -> Result<Response, reqwest::Error> {
+    pub async fn accept(&self) -> Result<Response, reqwest::Error> {
         let payload = if self.transcribe_caller {
             api::AcceptCall::new(&self.prompt).transcribe_caller()
         } else {
             api::AcceptCall::new(&self.prompt)
         };
-        self.execute(payload, call_id).await.inspect_err(|err| {
-            error!("Error response accepting call: {}", err);
-        })
+        self.execute(payload, &self.call_id)
+            .await
+            .inspect_err(|err| {
+                error!("Error response accepting call: {}", err);
+            })
+    }
+
+    pub async fn transfer(&self, target: &str) -> Result<Response, reqwest::Error> {
+        info!("Transferring call to {}", target);
+        let payload = api::ReferCall::new(target);
+        self.execute(payload, &self.call_id)
+            .await
+            .inspect_err(|err| {
+                error!("Error response transferring call: {}", err);
+            })
+    }
+
+    pub async fn hangup(&self) -> Result<Response, reqwest::Error> {
+        info!("Terminating call");
+        let payload = api::Hangup;
+        self.execute(payload, &self.call_id)
+            .await
+            .inspect_err(|err| {
+                error!("Error response hanging up call: {}", err);
+            })
+    }
+
+    pub async fn handle_effect(&self, side_effect: SideEffect) -> bool {
+        match side_effect {
+            SideEffect::Noop => false,
+            SideEffect::Transfer(target) => self.transfer(&target).await.is_ok(),
+            SideEffect::Terminate => {
+                let _ = self.hangup().await;
+                true
+            }
+        }
     }
 }
 
