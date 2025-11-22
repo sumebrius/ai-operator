@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::{Client, Response, header};
+use tracing::Instrument;
 
 use super::api::{self, ApiClient};
 use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent};
@@ -26,23 +27,34 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 
     while let Some(event) = ws_read.get_event().await {
         if let ServerEvent::ResponseDone(response) = event {
+            let span = debug_span!("response_handle", response.id = response.event_id());
+            let _ = span.enter();
+
             let function_calls = response.function_calls();
             if function_calls.is_empty() {
                 continue;
             }
 
             for call in function_calls {
-                let call_name = call.name();
-                let result = call.run();
-                info!(
-                    "Tool call {} {} results: {}",
-                    call_name, result.call_id, result.output
+                let fn_span = debug_span!(
+                    parent: &span,
+                    "function_call",
+                    function.call.name = call.name(),
+                    function.call.id = call.call_id()
                 );
 
+                let fn_span_guard = fn_span.enter();
+                let result = call.run();
+                info!("Tool call results: {}", result.output);
+                drop(fn_span_guard);
+
                 let message: client_event::Conversation = result.into();
-                let _ = ws_write.send(&message).await;
+                let _ = ws_write.send(&message).instrument(fn_span).await;
             }
-            let _ = ws_write.send(&client_event::Response::Create).await;
+            let _ = ws_write
+                .send(&client_event::Response::Create)
+                .instrument(span)
+                .await;
         };
     }
 }

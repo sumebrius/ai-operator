@@ -238,6 +238,10 @@ impl ResponseDone {
             })
             .collect()
     }
+
+    pub fn event_id(&self) -> &str {
+        &self.event_id
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -315,6 +319,10 @@ impl FunctionCall {
 
     pub fn name(&self) -> String {
         format!("{:?}", self.tool)
+    }
+
+    pub fn call_id(&self) -> &str {
+        &self.call_id
     }
 }
 
