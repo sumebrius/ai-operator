@@ -206,8 +206,7 @@ pub struct ReferCall {
 }
 
 impl ReferCall {
-    pub fn new(target: &str) -> Self {
-        let target_uri = target.to_string();
+    pub fn new(target_uri: String) -> Self {
         Self { target_uri }
     }
 }

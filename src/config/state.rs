@@ -6,6 +6,7 @@ pub struct AppState {
     prompt: Arc<String>,
     openai_key: Arc<String>,
     webhook: Option<Arc<Webhook>>,
+    sip_realm: Arc<String>,
     transcribe_caller: bool,
 }
 
@@ -18,12 +19,14 @@ impl AppState {
             .ok()
             .map(|secret| Webhook::new(&secret).expect("Bad Webhook Key"))
             .map(Arc::new);
+        let sip_realm = Arc::new(env::var("SIP_REALM").expect("No SIP realm"));
         let transcribe_caller = env::var("TRANSCRIBE_CALLER").is_ok();
 
         Self {
             prompt,
             openai_key,
             webhook,
+            sip_realm,
             transcribe_caller,
         }
     }
@@ -38,6 +41,10 @@ impl AppState {
 
     pub fn webhook(&self) -> Option<Arc<Webhook>> {
         self.webhook.clone()
+    }
+
+    pub fn sip_realm(&self) -> Arc<String> {
+        self.sip_realm.clone()
     }
 
     pub fn transcribe_caller(&self) -> bool {

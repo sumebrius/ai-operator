@@ -315,7 +315,7 @@ pub struct FunctionCall {
 
 impl FunctionCall {
     pub fn run(&self) -> (client_event::FunctionCallOutput, SideEffect) {
-        let result = self.tool.run(&self.arguments);
+        let result = self.tool.run(&self.arguments, &self.call_id);
         let call_id = self.call_id.clone();
         let output = result.output;
         (

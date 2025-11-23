@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
+use futures_util::lock::Mutex;
 use reqwest::{Client, Response, header};
 use tracing::Instrument;
 
 use super::api::{self, ApiClient};
 use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent};
-use crate::openai::tools::SideEffect;
+use crate::openai::tools::{SideEffect, SideEffectResult, TransferTarget};
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 
 #[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
@@ -44,17 +45,18 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
                 );
 
                 let fn_span_guard = fn_span.enter();
-                let (result, side_effect) = call.run();
+                let (mut result, side_effect) = call.run();
                 info!("Tool call results: {}", result.output);
                 drop(fn_span_guard);
 
+                match control_client.handle_effect(side_effect).await {
+                    SideEffectResult::Ok => {}
+                    SideEffectResult::Final => return,
+                    SideEffectResult::Error(err) => result.error(&err),
+                };
+
                 let message: client_event::Conversation = result.into();
                 let _ = ws_write.send(&message).instrument(fn_span).await;
-
-                let terminal = control_client.handle_effect(side_effect).await;
-                if terminal {
-                    return;
-                }
             }
             let _ = ws_write
                 .send(&client_event::Response::Create)
@@ -69,7 +71,9 @@ pub struct OpenAiControlSession {
     api_client: Client,
     token: Arc<String>,
     prompt: Arc<String>,
+    sip_realm: Arc<String>,
     transcribe_caller: bool,
+    valid_transfers: Mutex<Vec<TransferTarget>>,
 }
 
 impl OpenAiControlSession {
@@ -91,7 +95,9 @@ impl OpenAiControlSession {
             api_client: client,
             token: state.openai_key(),
             prompt: state.prompt(),
+            sip_realm: state.sip_realm(),
             transcribe_caller: state.transcribe_caller(),
+            valid_transfers: Mutex::new(Vec::new()),
         }
     }
 
@@ -110,7 +116,8 @@ impl OpenAiControlSession {
 
     pub async fn transfer(&self, target: &str) -> Result<Response, reqwest::Error> {
         info!("Transferring call to {}", target);
-        let payload = api::ReferCall::new(target);
+        let target_uri = format!("sip:{}@{}", target, self.sip_realm);
+        let payload = api::ReferCall::new(target_uri);
         self.execute(payload, &self.call_id)
             .await
             .inspect_err(|err| {
@@ -128,13 +135,31 @@ impl OpenAiControlSession {
             })
     }
 
-    pub async fn handle_effect(&self, side_effect: SideEffect) -> bool {
+    pub async fn handle_effect(&self, side_effect: SideEffect) -> SideEffectResult {
         match side_effect {
-            SideEffect::Noop => false,
-            SideEffect::Transfer(target) => self.transfer(&target).await.is_ok(),
+            SideEffect::Noop => SideEffectResult::Ok,
+            SideEffect::Store(target) => {
+                self.valid_transfers.lock().await.push(target);
+                SideEffectResult::Ok
+            }
+            SideEffect::Transfer(call_id) => {
+                match self
+                    .valid_transfers
+                    .lock()
+                    .await
+                    .iter()
+                    .find(|target| target.call_id == call_id)
+                {
+                    Some(target) => match self.transfer(&target.target).await {
+                        Ok(_) => SideEffectResult::Final,
+                        Err(err) => SideEffectResult::Error(format!("{:?}", err)),
+                    },
+                    None => SideEffectResult::Error("Invalid transfer call_id".to_string()),
+                }
+            }
             SideEffect::Terminate => {
                 let _ = self.hangup().await;
-                true
+                SideEffectResult::Final
             }
         }
     }

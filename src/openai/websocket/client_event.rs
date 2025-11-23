@@ -80,6 +80,12 @@ pub struct FunctionCallOutput {
     pub call_id: String,
 }
 
+impl FunctionCallOutput {
+    pub fn error(&mut self, message: &str) {
+        self.output = serde_json::json!({"error": format!("{:?}", message)}).to_string();
+    }
+}
+
 impl From<FunctionCallOutput> for Conversation {
     fn from(value: FunctionCallOutput) -> Self {
         Conversation::ItemCreate(ConversationItem {
