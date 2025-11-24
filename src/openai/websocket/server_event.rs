@@ -1,5 +1,7 @@
+#[cfg(debug_assertions)]
 use std::{fs::File, io::Write, time::SystemTime};
 
+#[cfg(debug_assertions)]
 use chrono::{DateTime, Utc};
 use futures_util::{StreamExt, stream::SplitStream};
 use serde::{Deserialize, Serialize};
@@ -16,11 +18,13 @@ use crate::openai::{
 
 type WsSource = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 pub struct MessageSource {
-    file: File,
+    #[cfg(debug_assertions)]
+    debug_file: File,
     stream: WsSource,
 }
 
 impl MessageSource {
+    #[cfg(debug_assertions)]
     pub fn new(stream: WsSource, call_id: &str) -> Self {
         let now: DateTime<Utc> = SystemTime::now().into();
         let file = File::create(format!(
@@ -30,7 +34,14 @@ impl MessageSource {
         ))
         .expect("Cant open log file");
 
-        Self { file, stream }
+        Self {
+            debug_file: file,
+            stream,
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    pub fn new(stream: WsSource, _call_id: &str) -> Self {
+        Self { stream }
     }
 
     pub async fn get_event(&mut self) -> Option<ServerEvent> {
@@ -73,16 +84,19 @@ impl MessageSource {
         Some(event)
     }
 
+    #[cfg(debug_assertions)]
     fn log(&mut self, msg: Message) {
         if let Message::Text(msg_bytes) = msg {
-            self.file
+            self.debug_file
                 .write_all(msg_bytes.as_bytes())
                 .unwrap_or_else(|err| error!("Unable to log message to file: {:?}", err));
-            self.file
+            self.debug_file
                 .write_all(b"\n")
                 .unwrap_or_else(|err| error!("Unable to log message to file: {:?}", err));
         }
     }
+    #[cfg(not(debug_assertions))]
+    fn log(&mut self, _msg: Message) {}
 }
 
 #[derive(Debug, Deserialize, Serialize)]

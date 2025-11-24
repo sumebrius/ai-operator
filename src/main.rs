@@ -15,9 +15,18 @@ mod openai;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
+    #[cfg(debug_assertions)]
+    {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .init();
+    }
 
     let state = AppState::start();
 
