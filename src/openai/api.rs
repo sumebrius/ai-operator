@@ -237,9 +237,9 @@ impl OpenApiCall for _RejectCall {
 }
 
 #[derive(Serialize, Debug)]
-pub struct Hangup;
+pub struct HangupCall;
 
-impl OpenApiCall for Hangup {
+impl OpenApiCall for HangupCall {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/hangup", API_ROOT, call_id)
     }

@@ -37,6 +37,7 @@ pub struct ToolResult {
 
 impl From<serde_json::Error> for ToolResult {
     fn from(value: serde_json::Error) -> Self {
+        error!("Error de/serialising tool call args/result: {}", value);
         let output = serde_json::json!({"error": format!("{:?}", value)}).to_string();
         Self {
             output,
@@ -268,7 +269,7 @@ impl FunctionTool for Terminate {
     "#;
 
     fn execute(&self, args: Self::Args<'_>, _call_id: &str) -> (Self::Return, SideEffect) {
-        info!("Call termination request: {:?}", args);
+        warn!("Call termination request: {:?}", args);
         ((), SideEffect::Terminate)
     }
 }

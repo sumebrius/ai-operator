@@ -56,10 +56,15 @@ pub async fn validate_webhook(
     request: Request,
     next: Next,
 ) -> Response {
+    if state.webhook().is_none() {
+        return next.run(request).await;
+    }
+
     let (parts, body) = request.into_parts();
     let payload = match to_bytes(body, usize::MAX).await {
         Ok(payload) => payload,
-        Err(_) => {
+        Err(err) => {
+            warn!("Bad Payload received: {}", err);
             return (StatusCode::BAD_REQUEST, "Invalid payload").into_response();
         }
     };
@@ -70,9 +75,11 @@ pub async fn validate_webhook(
     if let Some(webhook) = state.webhook() {
         let headers = &parts.headers;
         if webhook.verify(&payload, headers).is_err() {
+            warn!("Unvalidated webhook call");
             return (StatusCode::UNAUTHORIZED, "Invalid authentication").into_response();
         }
     }
+    debug!("Webhook passed validation");
 
     let request = Request::from_parts(parts, Body::from(payload));
     next.run(request).await

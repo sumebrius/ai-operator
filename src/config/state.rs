@@ -12,7 +12,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn start() -> Self {
-        // let prompt = Bytes::from(fs::read("./prompt.txt").expect("No prompt"));
+        info!("Initialising state");
         let prompt = Arc::new(fs::read_to_string("./prompt.txt").expect("No prompt"));
         let openai_key = Arc::new(env::var("OPENAI_API_KEY").expect("No OpenAI API Key"));
         let webhook = env::var("OPENAPI_WEBHOOK_SECRET")
@@ -21,6 +21,10 @@ impl AppState {
             .map(Arc::new);
         let sip_realm = Arc::new(env::var("SIP_REALM").expect("No SIP realm"));
         let transcribe_caller = env::var("TRANSCRIBE_CALLER").is_ok();
+        info!("State initialised");
+        if webhook.is_none() {
+            warn!("No webhook validation!");
+        }
 
         Self {
             prompt,

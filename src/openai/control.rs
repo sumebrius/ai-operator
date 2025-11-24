@@ -52,7 +52,10 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
                 match control_client.handle_effect(side_effect).await {
                     SideEffectResult::Ok => {}
                     SideEffectResult::Final => return,
-                    SideEffectResult::Error(err) => result.error(&err),
+                    SideEffectResult::Error(err) => {
+                        error!("Error handling side effect: {:?}", err);
+                        result.error(&err)
+                    }
                 };
 
                 let message: client_event::Conversation = result.into();
@@ -114,6 +117,16 @@ impl OpenAiControlSession {
             })
     }
 
+    pub async fn _reject(&self) -> Result<Response, reqwest::Error> {
+        warn!("Rejecting call");
+        let payload = api::_RejectCall::default();
+        self.execute(payload, &self.call_id)
+            .await
+            .inspect_err(|err| {
+                error!("Error response hanging up call: {}", err);
+            })
+    }
+
     pub async fn transfer(&self, target: &str) -> Result<Response, reqwest::Error> {
         info!("Transferring call to {}", target);
         let target_uri = format!("sip:{}@{}", target, self.sip_realm);
@@ -126,8 +139,8 @@ impl OpenAiControlSession {
     }
 
     pub async fn hangup(&self) -> Result<Response, reqwest::Error> {
-        info!("Terminating call");
-        let payload = api::Hangup;
+        warn!("Terminating call");
+        let payload = api::HangupCall;
         self.execute(payload, &self.call_id)
             .await
             .inspect_err(|err| {
