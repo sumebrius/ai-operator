@@ -1,6 +1,8 @@
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 
+use crate::contacts::ContactList;
+
 pub trait FunctionTool {
     type Args<'a>: JsonSchema + Deserialize<'a>;
     type Return: Serialize;
@@ -23,8 +25,8 @@ pub trait FunctionTool {
             .unwrap_or_else(|err| err.into())
     }
 
-    fn parameters() -> Schema {
-        schema_for!(Self::Args<'_>)
+    fn parameters() -> Option<Schema> {
+        Some(schema_for!(Self::Args<'_>))
     }
 }
 
@@ -135,7 +137,9 @@ fn bad_check(reason: &str) -> (ValidateResult, SideEffect) {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidateContactArgs {
-    #[schemars(description = "An array of contact names to check")]
+    #[schemars(
+        description = "An array of contact names to check. If a location is specified, add it to the end separated by a space. eg. \"Bob Office\""
+    )]
     contact: Vec<String>,
 }
 
@@ -151,16 +155,60 @@ impl FunctionTool for ValidateContact {
         error(string): If there was an error with the function call itself. 
     "#;
 
-    fn execute(&self, args: Self::Args<'_>, _call_id: &str) -> (Self::Return, SideEffect) {
-        info!("ValidateContact called with {:#?}", args);
-        let valid = false;
+    fn execute(&self, args: Self::Args<'_>, call_id: &str) -> (Self::Return, SideEffect) {
+        info!("ValidateContact for contacts: {:?}", args.contact);
+        let contact_list = ContactList::from_default();
+        for name in args.contact {
+            if let Some(contact) = contact_list.find(&name) {
+                let transfer = TransferTarget {
+                    call_id: call_id.to_string(),
+                    target: contact.number().to_string(),
+                };
+                info!("Storing validated transfer target: {:?}", transfer);
+                return (
+                    ValidateResult {
+                        valid: true,
+                        call_id: Some(call_id.to_string()),
+                    },
+                    SideEffect::Store(transfer),
+                );
+            }
+        }
+        // Fallthrough - nothing found
         (
             ValidateResult {
-                valid,
+                valid: false,
                 call_id: None,
             },
             SideEffect::Noop,
         )
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NullArgs {}
+
+#[derive(Debug, Deserialize)]
+pub struct ListContacts;
+
+impl FunctionTool for ListContacts {
+    type Args<'a> = NullArgs;
+    type Return = Vec<String>;
+    const DESCRIPTION: &str = r#"Get a list of all available contact names.
+    Use this if you want to cross-check a name provided by the user if you are not sure of
+    spelling, or a previous validation has return false.
+    Note that this DOES NOT REPLACE the need to call ValidateContact.
+    Returns:
+        array(str): List of available contacts
+        error(string): If there was an error with the function call itself. 
+    "#;
+
+    fn execute(&self, _args: Self::Args<'_>, _call_id: &str) -> (Self::Return, SideEffect) {
+        (ContactList::from_default().list(), SideEffect::Noop)
+    }
+
+    fn parameters() -> Option<Schema> {
+        None
     }
 }
 
@@ -269,4 +317,10 @@ macro_rules! build_tools {
     };
 }
 
-build_tools!(ValidatePhoneNumber, ValidateContact, Transfer, Terminate);
+build_tools!(
+    ValidatePhoneNumber,
+    ValidateContact,
+    ListContacts,
+    Transfer,
+    Terminate
+);

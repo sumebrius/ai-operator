@@ -10,6 +10,7 @@ use tower_http::trace::TraceLayer;
 use crate::{config::AppState, openai::webhook};
 
 mod config;
+mod contacts;
 mod openai;
 
 #[tokio::main]
