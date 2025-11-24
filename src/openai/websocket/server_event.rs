@@ -67,8 +67,8 @@ impl MessageSource {
         if event.ignore() {
             return None;
         }
+        event.log();
 
-        debug!("Server Event: {:?}", event);
         self.log(msg);
         Some(event)
     }
@@ -185,7 +185,69 @@ impl ServerEvent {
                 | Self::ResponseOutputAudioTranscriptDelta
                 | Self::ConversationItemInputAudioTranscriptionDelta
                 | Self::ResponseFunctionCallArgumentsDelta
+                | Self::ResponseMcpCallArgumentsDelta
         )
+    }
+
+    pub fn log(&self) {
+        match self {
+            // Error
+            ServerEvent::Error(_) => error!("Server Event: {:?}", self),
+            // Warn
+            ServerEvent::ConversationItemInputAudioTranscriptionFailed => {
+                warn!("Server Event: {:?}", self)
+            }
+            ServerEvent::McpListToolsFailed => warn!("Server Event: {:?}", self),
+            ServerEvent::ResponseMcpCallFailed => warn!("Server Event: {:?}", self),
+            // Info
+            ServerEvent::SessionCreated => info!("Server Event: {:?}", self),
+            ServerEvent::SessionUpdated => info!("Server Event: {:?}", self),
+            ServerEvent::ConversationItemInputAudioTranscriptionCompleted => {
+                info!("Server Event: {:?}", self)
+            }
+            ServerEvent::ConversationItemTruncated => info!("Server Event: {:?}", self),
+            ServerEvent::ConversationItemDeleted => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseCreated => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseDone(_) => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputItemAdded => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputAudioTranscriptDone => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseFunctionCallArgumentsDone => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseMcpCallArgumentsDone => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseMcpCallInProgress => info!("Server Event: {:?}", self),
+            ServerEvent::ResponseMcpCallCompleted => info!("Server Event: {:?}", self),
+            ServerEvent::RateLimitsUpdated => info!("Server Event: {:?}", self),
+            // Debug
+            ServerEvent::ConversationItemAdded => debug!("Server Event: {:?}", self),
+            ServerEvent::ConversationItemDone => debug!("Server Event: {:?}", self),
+            ServerEvent::ConversationItemRetrieved => debug!("Server Event: {:?}", self),
+            ServerEvent::InputAudioBufferCommitted => debug!("Server Event: {:?}", self),
+            ServerEvent::InputAudioBufferCleared => debug!("Server Event: {:?}", self),
+            ServerEvent::InputAudioBufferSpeechStarted => debug!("Server Event: {:?}", self),
+            ServerEvent::InputAudioBufferSpeechStopped => debug!("Server Event: {:?}", self),
+            ServerEvent::InputAudioBufferTimeoutTriggered => debug!("Server Event: {:?}", self),
+            ServerEvent::OutputAudioBufferStarted => debug!("Server Event: {:?}", self),
+            ServerEvent::OutputAudioBufferStopped => debug!("Server Event: {:?}", self),
+            ServerEvent::OutputAudioBufferCleared => debug!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputItemDone => debug!("Server Event: {:?}", self),
+            ServerEvent::ResponseContentPartAdded => debug!("Server Event: {:?}", self),
+            ServerEvent::ResponseContentPartDone => debug!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputTextDone => debug!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputAudioDone => debug!("Server Event: {:?}", self),
+            ServerEvent::McpListToolsInProgress => debug!("Server Event: {:?}", self),
+            ServerEvent::McpListToolsCompleted => debug!("Server Event: {:?}", self),
+            // Trace
+            ServerEvent::ConversationItemInputAudioTranscriptionDelta => {
+                trace!("Server Event: {:?}", self)
+            }
+            ServerEvent::ResponseOutputAudioTranscriptDelta => trace!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputAudioDelta => trace!("Server Event: {:?}", self),
+            ServerEvent::ResponseOutputTextDelta => trace!("Server Event: {:?}", self),
+            ServerEvent::ResponseFunctionCallArgumentsDelta => trace!("Server Event: {:?}", self),
+            ServerEvent::ResponseMcpCallArgumentsDelta => trace!("Server Event: {:?}", self),
+            ServerEvent::ConversationItemInputAudioTranscriptionSegment => {
+                trace!("Server Event: {:?}", self)
+            }
+        }
     }
 }
 
