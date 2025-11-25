@@ -52,9 +52,11 @@ pub enum AcceptCall<'a> {
 }
 
 impl<'a> AcceptCall<'a> {
-    pub fn new(prompt: &'a String) -> Self {
+    pub fn new(prompt: &'a String, voice: Voice) -> Self {
+        let audio = AudioConfig::with_voice(voice);
         Self::Realtime(Realtime {
             instructions: prompt,
+            audio,
             ..Default::default()
         })
     }
@@ -91,6 +93,16 @@ impl<'a> OpenApiCall for AcceptCall<'a> {
 pub struct AudioConfig {
     input: AudioInput,
     output: AudioOutput,
+}
+
+impl AudioConfig {
+    fn with_voice(voice: Voice) -> Self {
+        let output = AudioOutput::with_voice(voice);
+        Self {
+            output,
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -157,10 +169,19 @@ struct AudioOutput {
     voice: Voice,
 }
 
+impl AudioOutput {
+    fn with_voice(voice: Voice) -> Self {
+        Self {
+            voice,
+            ..Default::default()
+        }
+    }
+}
+
 #[allow(dead_code)]
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum Voice {
+pub enum Voice {
     Alloy,
     Ash,
     Ballad,
@@ -176,6 +197,34 @@ enum Voice {
 impl Default for Voice {
     fn default() -> Self {
         Self::Marin
+    }
+}
+
+impl TryFrom<&str> for Voice {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "alloy" => Ok(Self::Alloy),
+            "ash" => Ok(Self::Ash),
+            "ballad" => Ok(Self::Ballad),
+            "coral" => Ok(Self::Coral),
+            "echo" => Ok(Self::Echo),
+            "sage" => Ok(Self::Sage),
+            "shimmer" => Ok(Self::Shimmer),
+            "verse" => Ok(Self::Verse),
+            "marin" => Ok(Self::Marin),
+            "cedar" => Ok(Self::Cedar),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<String> for Voice {
+    type Error = ();
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.as_str().try_into()
     }
 }
 

@@ -7,6 +7,7 @@ use tracing::Instrument;
 
 use super::api::{self, ApiClient};
 use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent};
+use crate::openai::api::Voice;
 use crate::openai::tools::{SideEffect, SideEffectResult, TransferTarget};
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 
@@ -19,7 +20,7 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     let control_client = OpenAiControlSession::new(&state, call_id);
 
     //TODO - We should prolly authenticate the call and not just blindly accept
-    if control_client.accept().await.is_err() {
+    if control_client.accept(state.voice()).await.is_err() {
         return;
     };
     info!("Call Answered");
@@ -118,8 +119,8 @@ impl OpenAiControlSession {
         }
     }
 
-    pub async fn accept(&self) -> Result<Response, reqwest::Error> {
-        let payload = api::AcceptCall::new(&self.prompt);
+    pub async fn accept(&self, voice: Voice) -> Result<Response, reqwest::Error> {
+        let payload = api::AcceptCall::new(&self.prompt, voice);
         self.execute(payload, &self.call_id)
             .await
             .inspect_err(|err| {

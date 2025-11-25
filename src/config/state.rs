@@ -4,9 +4,12 @@
 use standardwebhooks::Webhook;
 use std::{env, fs, sync::Arc};
 
+use crate::openai::api::Voice;
+
 #[derive(Clone)]
 pub struct AppState {
     prompt: Arc<String>,
+    voice: Arc<Voice>,
     openai_key: Arc<String>,
     webhook: Option<Arc<Webhook>>,
     sip_realm: Arc<String>,
@@ -17,6 +20,12 @@ impl AppState {
     pub fn init() -> Self {
         info!("Initialising state");
         let prompt = Arc::new(fs::read_to_string("./prompt.txt").expect("No prompt"));
+        let voice = Arc::new(
+            env::var("VOICE")
+                .unwrap_or_default()
+                .try_into()
+                .unwrap_or_default(),
+        );
         let openai_key = Arc::new(env::var("OPENAI_API_KEY").expect("No OpenAI API Key"));
         let webhook = env::var("OPENAPI_WEBHOOK_SECRET")
             .ok()
@@ -31,6 +40,7 @@ impl AppState {
 
         Self {
             prompt,
+            voice,
             openai_key,
             webhook,
             sip_realm,
@@ -56,5 +66,9 @@ impl AppState {
     /// Get SIP realm for transfers
     pub fn sip_realm(&self) -> Arc<String> {
         self.sip_realm.clone()
+    }
+
+    pub fn voice(&self) -> Voice {
+        *self.voice
     }
 }
