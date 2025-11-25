@@ -27,7 +27,7 @@ impl AppState {
                 .unwrap_or_default(),
         );
         let openai_key = Arc::new(env::var("OPENAI_API_KEY").expect("No OpenAI API Key"));
-        let webhook = env::var("OPENAPI_WEBHOOK_SECRET")
+        let webhook = env::var("OPENAI_WEBHOOK_SECRET")
             .ok()
             .map(|secret| Webhook::new(&secret).expect("Bad Webhook Key"))
             .map(Arc::new);
