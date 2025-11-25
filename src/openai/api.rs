@@ -51,14 +51,6 @@ impl<'a> AcceptCall<'a> {
             ..Default::default()
         })
     }
-
-    pub fn transcribe_caller(mut self) -> Self {
-        let Self::Realtime(ref mut rt) = self;
-        rt.audio.input.transcription = Some(Transcription {
-            ..Default::default()
-        });
-        self
-    }
 }
 
 #[derive(Serialize, Debug)]
@@ -94,11 +86,28 @@ pub struct AudioConfig {
     output: AudioOutput,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Serialize)]
 struct AudioInput {
     format: AudioFormat,
     #[serde(skip_serializing_if = "Option::is_none")]
     transcription: Option<Transcription>,
+}
+
+impl Default for AudioInput {
+    #[cfg(debug_assertions)]
+    fn default() -> Self {
+        Self {
+            format: Default::default(),
+            transcription: None,
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    fn default() -> Self {
+        Self {
+            format: Default::default(),
+            transcription: Some(Default::default()),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

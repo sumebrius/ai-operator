@@ -7,11 +7,11 @@ pub struct AppState {
     openai_key: Arc<String>,
     webhook: Option<Arc<Webhook>>,
     sip_realm: Arc<String>,
-    transcribe_caller: bool,
 }
 
 impl AppState {
-    pub fn start() -> Self {
+    /// Initialise application state
+    pub fn init() -> Self {
         info!("Initialising state");
         let prompt = Arc::new(fs::read_to_string("./prompt.txt").expect("No prompt"));
         let openai_key = Arc::new(env::var("OPENAI_API_KEY").expect("No OpenAI API Key"));
@@ -20,7 +20,7 @@ impl AppState {
             .map(|secret| Webhook::new(&secret).expect("Bad Webhook Key"))
             .map(Arc::new);
         let sip_realm = Arc::new(env::var("SIP_REALM").expect("No SIP realm"));
-        let transcribe_caller = env::var("TRANSCRIBE_CALLER").is_ok();
+
         info!("State initialised");
         if webhook.is_none() {
             warn!("No webhook validation!");
@@ -31,27 +31,27 @@ impl AppState {
             openai_key,
             webhook,
             sip_realm,
-            transcribe_caller,
         }
     }
 
+    /// Get prompt for operator model
     pub fn prompt(&self) -> Arc<String> {
         self.prompt.clone()
     }
 
+    /// Get OpenAI API Key
     pub fn openai_key(&self) -> Arc<String> {
         self.openai_key.clone()
     }
 
+    /// Get webhook validator
+    /// This is pre-initialised with the key
     pub fn webhook(&self) -> Option<Arc<Webhook>> {
         self.webhook.clone()
     }
 
+    /// Get SIP realm for transfers
     pub fn sip_realm(&self) -> Arc<String> {
         self.sip_realm.clone()
-    }
-
-    pub fn transcribe_caller(&self) -> bool {
-        self.transcribe_caller
     }
 }

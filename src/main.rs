@@ -28,7 +28,7 @@ async fn main() {
             .init();
     }
 
-    let state = AppState::start();
+    let state = AppState::init();
 
     let webhook_server = Router::new()
         .route("/", get(|| async { "Sup" }))

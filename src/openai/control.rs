@@ -75,7 +75,6 @@ pub struct OpenAiControlSession {
     token: Arc<String>,
     prompt: Arc<String>,
     sip_realm: Arc<String>,
-    transcribe_caller: bool,
     valid_transfers: Mutex<Vec<TransferTarget>>,
 }
 
@@ -99,17 +98,12 @@ impl OpenAiControlSession {
             token: state.openai_key(),
             prompt: state.prompt(),
             sip_realm: state.sip_realm(),
-            transcribe_caller: state.transcribe_caller(),
             valid_transfers: Mutex::new(Vec::new()),
         }
     }
 
     pub async fn accept(&self) -> Result<Response, reqwest::Error> {
-        let payload = if self.transcribe_caller {
-            api::AcceptCall::new(&self.prompt).transcribe_caller()
-        } else {
-            api::AcceptCall::new(&self.prompt)
-        };
+        let payload = api::AcceptCall::new(&self.prompt);
         self.execute(payload, &self.call_id)
             .await
             .inspect_err(|err| {
