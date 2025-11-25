@@ -1,7 +1,7 @@
 FROM rust:1-slim-trixie as builder
 
 WORKDIR /usr/src/ai-operator
-COPY Cargo.lock Cargo.toml .
+COPY Cargo.lock Cargo.toml ./
 COPY src/ src/
 RUN cargo install --path .
 
