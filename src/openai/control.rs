@@ -1,3 +1,4 @@
+/// Main control loop for handling a call
 use std::sync::Arc;
 
 use futures_util::lock::Mutex;
@@ -9,30 +10,40 @@ use super::websocket::{WebsocketClient, client_event, server_event::ServerEvent}
 use crate::openai::tools::{SideEffect, SideEffectResult, TransferTarget};
 use crate::{config::AppState, openai::webhook::RealtimeCallIncoming};
 
+/// Main thread for handling the event loop.
+/// Spawned directly from the webhook
 #[tracing::instrument(skip_all, fields(call.id = &call.call_id()))]
 pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
     info!("Handling call");
     let call_id = call.call_id();
     let control_client = OpenAiControlSession::new(&state, call_id);
+
+    //TODO - We should prolly authenticate the call and not just blindly accept
     if control_client.accept().await.is_err() {
         return;
     };
     info!("Call Answered");
 
-    let (mut ws_write, mut ws_read) = match control_client.connect_ws(call_id).await {
+    let (mut ws_write, mut ws_read) = match control_client.connect_websocket(call_id).await {
         Ok(clients) => clients,
         Err(_) => return,
     };
 
+    // Tell the model to start a response, otherwise it will wait for the user.
     let _ = ws_write.send(&client_event::Response::Create).await;
 
+    // Start listening to server events
     while let Some(event) = ws_read.get_event().await {
+        // We actually only really care about `response.done`
+        // This is where the model actually sends function calls
         if let ServerEvent::ResponseDone(response) = event {
             let span = debug_span!("response_handle", response.id = response.event_id());
             let _ = span.enter();
 
             let function_calls = response.function_calls();
             if function_calls.is_empty() {
+                // And we really only give a shit ones with function calls.
+                // We can let the model just handle the rest itself.
                 continue;
             }
 
@@ -43,12 +54,15 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
                     function.call.name = call.name(),
                     function.call.id = call.call_id()
                 );
-
                 let fn_span_guard = fn_span.enter();
+
+                // Call the tool
                 let (mut result, side_effect) = call.run();
                 info!("Tool call results: {}", result.output);
+                // Drop the guard here so we can re-use the span
                 drop(fn_span_guard);
 
+                // Execute the side effect and handle its impact on the main loop
                 match control_client.handle_effect(side_effect).await {
                     SideEffectResult::Ok => {}
                     SideEffectResult::Final => return,
@@ -58,9 +72,11 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
                     }
                 };
 
+                // Send the result back to the model
                 let message: client_event::Conversation = result.into();
                 let _ = ws_write.send(&message).instrument(fn_span).await;
             }
+            // Indicate to the model to start a new response based on the outputs
             let _ = ws_write
                 .send(&client_event::Response::Create)
                 .instrument(span)

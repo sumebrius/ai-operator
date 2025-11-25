@@ -1,3 +1,6 @@
+/// Global application state
+///
+/// Primarily shit loaded on init, hence being in config.
 use standardwebhooks::Webhook;
 use std::{env, fs, sync::Arc};
 

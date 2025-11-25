@@ -1,15 +1,30 @@
+/// Tools for use by the model as function calls
+/// The layers are leaky asf for this
+/// We define how to run it and the *first* layer of serialising the result here
+/// The run function is called by the `FunctionCall` event in server events,
+///   which mixes that in with its own deets to generate the client event.
+/// And the call of that is done in the innermost loop of the main control thread.
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 
 use crate::contacts::ContactList;
 
 pub trait FunctionTool {
+    /// Args taken by the tool. We generate a schema to tell the model how to call it.
+    /// Note that this always needs to be a full struct, otherwise the API gets thoroughly
+    /// confused and times out. Use `NullArgs` if no args are required.
     type Args<'a>: JsonSchema + Deserialize<'a>;
+    /// The Return type of the tool's payload back to the model.
     type Return: Serialize;
+    /// Description of the tool. Used to describe it to the model, so make it prompty.
     const DESCRIPTION: &str;
 
+    /// The actual logic for individual tools
     fn execute(&self, args: Self::Args<'_>, call_id: &str) -> (Self::Return, SideEffect);
 
+    /// External interface for the trait.
+    /// Deserialises the args, calls `.execute()`, and serialises the response
+    /// while handling errors
     fn run(&self, payload: &str, call_id: &str) -> ToolResult {
         serde_json::from_str::<Self::Args<'_>>(payload)
             .map(|args| {
@@ -25,6 +40,7 @@ pub trait FunctionTool {
             .unwrap_or_else(|err| err.into())
     }
 
+    /// Just here for serialisation
     fn parameters() -> Option<Schema> {
         Some(schema_for!(Self::Args<'_>))
     }
@@ -46,24 +62,46 @@ impl From<serde_json::Error> for ToolResult {
     }
 }
 
+/// Side effect of a tool call
 pub enum SideEffect {
+    /// No side effects
     Noop,
+    /// Successful validation - store the details for a later transfer
     Store(TransferTarget),
+    /// Transfer to an earlier validated target
     Transfer(String),
+    /// Hang up the call
     Terminate,
 }
 
+/// A validated number for transferring to
+/// These get stored in a vec, and grab one by the call_id when transferring.
+/// Basically a hashmap without the hash, 'cos we'll only ever have like 2 of
+/// these, tops.
+/// The model only ever knows about the call_id, so we can be safe against
+/// hallucinations in the actual transfer call.
 #[derive(Debug)]
 pub struct TransferTarget {
+    /// The call id of the tool call that validated/stored this
     pub call_id: String,
+    /// The number to transfer to.
     pub target: String,
 }
 
+/// The result of calling the side effect by the controller.
+/// Basically a ternary Result
 pub enum SideEffectResult {
+    /// OK, and Keep going
     Ok,
+    /// OK, but terminate the thread
     Final,
+    /// Error with the side effect itself
+    /// Report back to the model and keep going.
     Error(String),
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NullArgs {}
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidateResult {
@@ -89,6 +127,8 @@ impl FunctionTool for ValidatePhoneNumber {
         error(string): If there was an error with the function call itself. 
     "#;
 
+    /// Currently just validates it has at least enough digits.
+    /// At some stgae, we prolly want to validate this against a dial plan...
     fn execute(&self, args: Self::Args<'_>, call_id: &str) -> (Self::Return, SideEffect) {
         info!("ValidatePhoneNumber called digits {:?}", args.digits);
         if args.digits.len() < 7 {
@@ -125,6 +165,7 @@ impl FunctionTool for ValidatePhoneNumber {
     }
 }
 
+/// Basically just ? for the above tool's execute.
 fn bad_check(reason: &str) -> (ValidateResult, SideEffect) {
     warn!("Request not valid: {}", reason);
     (
@@ -156,6 +197,8 @@ impl FunctionTool for ValidateContact {
         error(string): If there was an error with the function call itself. 
     "#;
 
+    /// Currently just loads the contact list from a static CSV which we load on each call.
+    /// Is there a better way to do this? Yes, but cbf...
     fn execute(&self, args: Self::Args<'_>, call_id: &str) -> (Self::Return, SideEffect) {
         info!("ValidateContact for contacts: {:?}", args.contact);
         let contact_list = ContactList::from_default();
@@ -185,9 +228,6 @@ impl FunctionTool for ValidateContact {
         )
     }
 }
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NullArgs {}
 
 #[derive(Debug, Deserialize)]
 pub struct ListContacts;
@@ -274,6 +314,9 @@ impl FunctionTool for Terminate {
     }
 }
 
+/// This builds an enum out of all the tools.
+/// It only gets called once, but each tool's name is used 8 times in the definition,
+/// So fuck that noise of adding them in manually.
 macro_rules! build_tools {
     ( $( $tool:ident ),+ ) => {
 
@@ -284,17 +327,22 @@ macro_rules! build_tools {
         }
 
         impl Tool {
+            /// Proxy through to each tool's run method.
             pub fn run(&self, payload: &str, call_id: &str) -> ToolResult {
                 match self {
                     $(Self::$tool => $tool.run(payload, call_id),)*
                 }
             }
 
+            /// Get a list of all the tools to tell the model about them.
+            /// Each one gets serialised so this blows out to a huge chunk of payload
             pub fn all() -> Vec<Self> {
                 vec![$(Tool::$tool, )*]
             }
         }
 
+        /// Serialise each member to this payload:
+        /// https://platform.openai.com/docs/api-reference/realtime-calls/accept-call#realtime_calls_accept_call-tools-function_tool
         impl Serialize for Tool {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where

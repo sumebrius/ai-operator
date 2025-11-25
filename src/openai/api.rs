@@ -1,10 +1,17 @@
+/// Client and serialisable structs for interacting with the OpenAI Rest API.
+///
+/// This is used for controlling the SIP call itself.
+/// Definitions: https://platform.openai.com/docs/api-reference/realtime-calls
 use crate::{config::API_ROOT, openai::tools::Tool};
 use reqwest::{Client, Response};
 use serde::{Serialize, Serializer};
 
+/// Again, could this just be a method on the single implementor?
+/// Again, yes.
 pub trait ApiClient {
     fn client(&self) -> &Client;
 
+    /// Send an event
     async fn execute(
         &self,
         action: impl OpenApiCall,

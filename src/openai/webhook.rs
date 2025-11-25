@@ -12,6 +12,7 @@ use serde::{self, Deserialize, Serialize};
 
 use crate::{config::AppState, openai::control::handle_call};
 
+/// Definition: https://platform.openai.com/docs/api-reference/webhook-events/realtime/call/incoming
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RealtimeCallIncoming {
     id: String,
@@ -46,11 +47,15 @@ struct SipHeader {
     value: String,
 }
 
+/// Axum endpoint to listen to the webhook
+/// All it does is fire of a thread for the main control loop.
 pub async fn webhook(State(state): State<AppState>, Json(payload): Json<RealtimeCallIncoming>) {
     info_span!("webhook", webhook.id = payload.get_id()).in_scope(|| info!("Webhook received"));
     tokio::spawn(handle_call(state, payload));
 }
 
+/// Middleware to authenticate the webhook
+/// https://platform.openai.com/docs/guides/webhooks#verifying-webhook-signatures
 pub async fn validate_webhook(
     State(state): State<AppState>,
     request: Request,

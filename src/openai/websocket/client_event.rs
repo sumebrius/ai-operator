@@ -1,3 +1,5 @@
+/// Mostly structs defining events we send down the WS connection
+/// as defined here https://platform.openai.com/docs/api-reference/realtime-client-events
 use std::fmt::Display;
 
 use futures_util::{SinkExt, stream::SplitSink};
@@ -6,7 +8,10 @@ use serde_json::to_string;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite};
 
+/// Alias for the actual Sink type we get from tokio_tungstenite
 type WsSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::Message>;
+
+/// A thin wrapper around a tungstenite WS sink, with a convenience for sending our own events
 pub struct MessageSink(WsSink);
 
 impl MessageSink {
@@ -14,6 +19,7 @@ impl MessageSink {
         Self(sink)
     }
 
+    /// Send a client_event struct
     pub async fn send<S: Serialize + Display>(
         &mut self,
         message: &S,
@@ -81,6 +87,7 @@ pub struct FunctionCallOutput {
 }
 
 impl FunctionCallOutput {
+    /// Transform the output to indicate an error condition
     pub fn error(&mut self, message: &str) {
         self.output = serde_json::json!({"error": format!("{:?}", message)}).to_string();
     }

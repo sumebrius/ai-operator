@@ -1,3 +1,4 @@
+/// Contact List used by the `ValidateContact` tool call
 use std::{collections::HashSet, hash::Hash, path::Path};
 
 use serde::Deserialize;
@@ -13,6 +14,11 @@ impl From<csv::Error> for Error {
     }
 }
 
+/// An individual contact
+/// It's hashable so we can store it in a hashset.
+/// It only has two values, so you're probably wondering if it
+/// would be easier to just use a hashmap and use the key/vals?
+/// Yes, yes it would.
 #[derive(Debug, Deserialize)]
 pub struct Contact {
     name: String,
@@ -52,12 +58,14 @@ impl ContactList {
         Ok(Self(hashset))
     }
 
+    /// Honestly this is the only used entrypoint
     pub fn from_default() -> Self {
         Self::from_path(Self::DEFAULT_PATH)
             .inspect_err(|err| error!("Unable to load default contact list: {:?}", err))
             .unwrap_or_default()
     }
 
+    /// This would definitely have been easier to just use a hashmap
     pub fn find(&self, name: &str) -> Option<&Contact> {
         let search_value = Contact {
             name: name.to_lowercase(),
@@ -66,6 +74,7 @@ impl ContactList {
         self.0.get(&search_value)
     }
 
+    /// Get a list of all the contact names
     pub fn list(&self) -> Vec<String> {
         self.0
             .iter()

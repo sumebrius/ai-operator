@@ -1,3 +1,5 @@
+/// Mostly structs defining events we receive from the WS connection
+/// as defined here https://platform.openai.com/docs/api-reference/realtime-server-events
 #[cfg(debug_assertions)]
 use std::{fs::File, io::Write, time::SystemTime};
 
@@ -16,7 +18,13 @@ use crate::openai::{
     websocket::client_event,
 };
 
+/// Alias for the actual Source type we get from tokio_tungstenite
 type WsSource = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+
+/// A thin wrapper around a tungstenite WS source, with a filter for
+/// events we actually give a shit about.
+/// Also handles dumping the raw payloads out to a log file for debugging
+/// in dev mode.
 pub struct MessageSource {
     #[cfg(debug_assertions)]
     debug_file: File,
@@ -44,10 +52,12 @@ impl MessageSource {
         Self { stream }
     }
 
+    /// A wrapper around the underlying stream's `.next()` call,
+    /// with a filter for relevant messages only.
     pub async fn get_event(&mut self) -> Option<ServerEvent> {
         loop {
             match self.stream.next().await {
-                Some(msg) => match self.handle_event(msg) {
+                Some(msg) => match self.decode_event(msg) {
                     Some(event) => return Some(event),
                     None => continue,
                 },
@@ -56,7 +66,7 @@ impl MessageSource {
         }
     }
 
-    fn handle_event(
+    fn decode_event(
         &mut self,
         msg: Result<Message, tungstenite::error::Error>,
     ) -> Option<ServerEvent> {
@@ -75,7 +85,7 @@ impl MessageSource {
                 return None;
             }
         };
-        if event.ignore() {
+        if event.ignore_for_dbg_log() {
             return None;
         }
         event.log();
@@ -84,6 +94,7 @@ impl MessageSource {
         Some(event)
     }
 
+    /// Log the message to our debug file (if we're doing that)
     #[cfg(debug_assertions)]
     fn log(&mut self, msg: Message) {
         if let Message::Text(msg_bytes) = msg {
@@ -99,6 +110,9 @@ impl MessageSource {
     fn log(&mut self, _msg: Message) {}
 }
 
+/// Main enum defining all the possible events we could get from the server.
+/// We ignore the content of most of these, so don't define any structs to
+/// deserialise them.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerEvent {
@@ -191,7 +205,7 @@ pub enum ServerEvent {
 }
 
 impl ServerEvent {
-    pub fn ignore(&self) -> bool {
+    pub fn ignore_for_dbg_log(&self) -> bool {
         matches!(
             self,
             Self::ResponseOutputTextDelta
@@ -203,6 +217,7 @@ impl ServerEvent {
         )
     }
 
+    /// We log every event we receive, just at different levels.
     pub fn log(&self) {
         match self {
             // Error
@@ -265,8 +280,10 @@ impl ServerEvent {
     }
 }
 
+/// Error indicating the server sent us a bad message.
+/// Gets serialised to send it back up at'em
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Supress errors about not using the wrapped values, but we use them for "{:?}" in serialisation
 pub enum MessageDecodeError {
     MessageType(Message),
     Deserialization(serde_json::Error),
@@ -307,6 +324,7 @@ pub struct ResponseDone {
 }
 
 impl ResponseDone {
+    /// Get a list of any function calls made in this request
     pub fn function_calls(&self) -> Vec<&FunctionCall> {
         self.response
             .output
@@ -385,11 +403,15 @@ pub struct FunctionCall {
     id: String,
     call_id: String,
     #[serde(flatten)]
+    // There's a whole bunch of serde fuckery to get this serialising *just right*
     tool: Tool,
     arguments: String,
 }
 
 impl FunctionCall {
+    /// Actually run the call through the tool
+    /// Returns the client event to send back to the API,
+    /// and a possible side-effect for us to handle
     pub fn run(&self) -> (client_event::FunctionCallOutput, SideEffect) {
         let result = self.tool.run(&self.arguments, &self.call_id);
         let call_id = self.call_id.clone();
@@ -400,6 +422,7 @@ impl FunctionCall {
         )
     }
 
+    /// Get the name of the tool - just used for building a tracing span
     pub fn name(&self) -> String {
         format!("{:?}", self.tool)
     }

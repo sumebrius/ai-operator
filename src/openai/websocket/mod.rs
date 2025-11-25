@@ -1,3 +1,6 @@
+/// Active and serialisable structs for interacting with the OpenAI WebSocket API
+///
+/// This is used for actually interacting with the running model.
 use crate::config::WS_URI;
 use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite;
@@ -5,10 +8,13 @@ use tokio_tungstenite::tungstenite;
 pub mod client_event;
 pub mod server_event;
 
+/// Could this just be a method on the single implementor directly?
+///
+/// Yeah, actually.
 pub trait WebsocketClient {
     fn get_token(&self) -> &str;
 
-    async fn connect_ws(
+    async fn connect_websocket(
         &self,
         call_id: &str,
     ) -> Result<(client_event::MessageSink, server_event::MessageSource), tungstenite::Error> {
