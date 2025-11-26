@@ -41,7 +41,7 @@ ingress:
 contactList: null
 
 secret:
-  name: ""
+  name: "ai-operator"
 
 resources: {}
 
