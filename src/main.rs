@@ -30,18 +30,24 @@ async fn main() {
 
     let state = AppState::init();
 
-    let webhook_server = Router::new()
-        .route("/", get(|| async { "Sup" }))
-        .route("/", post(webhook::webhook))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            webhook::validate_webhook,
-        ))
+    let webhook_server =
+        Router::new()
+            .route("/", post(webhook::webhook))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                webhook::validate_webhook,
+            ));
+
+    let liveness = Router::new().route("/", get(|| async { "ok" }));
+
+    let app = Router::new()
+        .nest("/livez", liveness)
+        .nest("/webhook", webhook_server)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 
     info!("Serving Webhook server");
-    axum::serve(listener, webhook_server).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
