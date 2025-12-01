@@ -2,7 +2,7 @@
 ///
 /// Primarily shit loaded on init, hence being in config.
 use standardwebhooks::Webhook;
-use std::{env, fs, sync::Arc};
+use std::{env, sync::Arc};
 
 use crate::openai::api::Voice;
 
@@ -19,7 +19,7 @@ impl AppState {
     /// Initialise application state
     pub fn init() -> Self {
         info!("Initialising state");
-        let prompt = Arc::new(fs::read_to_string("./prompt.txt").expect("No prompt"));
+        let prompt = Arc::new(include_str!("prompt.txt").to_string());
         let voice = Arc::new(
             env::var("VOICE")
                 .unwrap_or_default()
