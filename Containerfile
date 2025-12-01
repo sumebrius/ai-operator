@@ -11,5 +11,6 @@ FROM debian:trixie-slim
 COPY --from=builder /usr/local/cargo/bin/ai-operator /usr/local/bin/ai-operator
 COPY prompt.txt .
 
+WORKDIR /app
 EXPOSE 3000/tcp
 CMD ["ai-operator"]

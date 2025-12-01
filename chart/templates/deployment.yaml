@@ -61,7 +61,7 @@ spec:
           {{- if .Values.contactList }}
           volumeMounts:
             - name: files
-              mountPath: /
+              mountPath: /app
           {{- end }}
       {{- if .Values.contactList }}
       volumes:
