@@ -54,9 +54,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.secret.name }}
-            envFrom:
-            - secretRef:
-                name: {{ . }}
+          envFrom:
+          - secretRef:
+              name: {{ . }}
           {{- end }}
           {{- if .Values.contactList }}
           volumeMounts:
