@@ -196,7 +196,7 @@ pub enum Voice {
 
 impl Default for Voice {
     fn default() -> Self {
-        Self::Marin
+        Self::Cedar
     }
 }
 
