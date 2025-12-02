@@ -7,6 +7,6 @@ metadata:
     {{- include "chart.labels" . | nindent 4 }}
 data:
   contacts.csv: |
-    Name,Number
+    name,number
     {{- .Values.contactList | nindent 4 }}
 {{- end }}
