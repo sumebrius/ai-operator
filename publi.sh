@@ -6,7 +6,8 @@ VERSION=$(cargo metadata --format-version=1 --no-deps | jq '.packages[0].version
 TAG="v${VERSION}"
 podman login --authfile ~/.config/containers/auth.json
 podman build --no-cache -t registry.sumebrius.com/library/ai-operator:latest -t registry.sumebrius.com/library/ai-operator:${VERSION} .
-podman push registry.sumebrius.com/library/ai-operator:latest registry.sumebrius.com/library/ai-operator:${VERSION}
+podman push registry.sumebrius.com/library/ai-operator:distroless 
+podman push registry.sumebrius.com/library/ai-operator:${VERSION}-distroless
 
 set +e
 git show-ref --tags ${TAG} --quiet
