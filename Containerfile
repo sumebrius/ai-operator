@@ -1,15 +1,16 @@
 FROM rust:1-slim-trixie as builder
 
-WORKDIR /usr/src/ai-operator
+WORKDIR /build
+RUN cargo install cargo-auditable
 COPY Cargo.lock Cargo.toml ./
 COPY src/ src/
-RUN cargo install --path .
+RUN cargo auditable build --release
 
 # Runtime image
-FROM debian:trixie-slim
+FROM gcr.io/distroless/cc-debian13:nonroot
 
-COPY --from=builder /usr/local/cargo/bin/ai-operator /usr/local/bin/ai-operator
+COPY --from=builder /build/target/release/ai-operator /bin/
 
 WORKDIR /app
 EXPOSE 3000/tcp
-CMD ["ai-operator"]
+CMD ["/bin/ai-operator"]
