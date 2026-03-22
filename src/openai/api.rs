@@ -2,7 +2,10 @@
 ///
 /// This is used for controlling the SIP call itself.
 /// Definitions: https://platform.openai.com/docs/api-reference/realtime-calls
-use crate::{config::API_ROOT, openai::tools::Tool};
+use crate::{
+    config::{API_ROOT, DEFAULT_MODEL},
+    openai::tools::Tool,
+};
 use reqwest::{Client, Response};
 use serde::{Serialize, Serializer};
 
@@ -74,7 +77,7 @@ pub struct Realtime<'a> {
 impl<'a> Default for Realtime<'a> {
     fn default() -> Self {
         Self {
-            model: Some("gpt-realtime".to_string()),
+            model: Some(DEFAULT_MODEL.to_string()),
             audio: Default::default(),
             instructions: Default::default(),
             tools: Tool::all(),
