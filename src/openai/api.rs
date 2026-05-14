@@ -153,17 +153,13 @@ impl Default for Transcription {
 #[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 enum TranscriptionModel {
     whisper_1,
+    #[default]
     gpt_4o_mini_transcribe,
     gpt_4o_transcribe,
     gpt_4o_transcribe_diarize,
-}
-
-impl Default for TranscriptionModel {
-    fn default() -> Self {
-        Self::gpt_4o_mini_transcribe
-    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -184,6 +180,7 @@ impl AudioOutput {
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Voice {
     Alloy,
     Ash,
@@ -194,13 +191,8 @@ pub enum Voice {
     Shimmer,
     Verse,
     Marin,
+    #[default]
     Cedar,
-}
-
-impl Default for Voice {
-    fn default() -> Self {
-        Self::Cedar
-    }
 }
 
 impl TryFrom<&str> for Voice {
@@ -234,19 +226,15 @@ impl TryFrom<String> for Voice {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 #[allow(dead_code)]
+#[derive(Default)]
 enum AudioFormat {
     #[serde(rename = "audio/pcm")]
     Pcm { rate: usize },
     #[serde(rename = "audio/pcma")]
+    #[default]
     Alaw,
     #[serde(rename = "audio/pcmu")]
     Ulaw,
-}
-
-impl Default for AudioFormat {
-    fn default() -> Self {
-        Self::Alaw
-    }
 }
 
 #[allow(dead_code)]
