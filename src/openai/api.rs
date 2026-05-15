@@ -8,27 +8,33 @@ use crate::{
 };
 use std::{fmt, sync::Arc};
 
+use bytes::Bytes;
+use http::{Request, StatusCode, header};
+use http_body_util::{BodyExt, Full};
+use hyper::client::conn::http1;
+use hyper_util::rt::TokioIo;
 use serde::{Serialize, Serializer};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
-};
+use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::{
     TlsConnector,
     rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
 };
+use tokio_tungstenite::MaybeTlsStream;
 use webpki_roots::TLS_SERVER_ROOTS;
+
+type RequestBody = Full<Bytes>;
+type ApiSender = http1::SendRequest<RequestBody>;
 
 /// Again, could this just be a method on the single implementor?
 /// Again, yes.
 pub trait ApiClient {
-    fn bearer_token(&self) -> &str;
+    fn api_client(&self) -> &ApiHttpClient;
 
     /// Send an event
     async fn execute(&self, action: impl OpenApiCall, call_id: &str) -> Result<(), ApiError> {
         let url = action.get_url(call_id);
         let body = serde_json::to_vec(&action)?;
-        post_json(&url, self.bearer_token(), &body).await
+        self.api_client().post_json(&url, body).await
     }
 }
 
@@ -81,15 +87,32 @@ impl From<std::io::Error> for ApiError {
     }
 }
 
+impl From<hyper::Error> for ApiError {
+    fn from(value: hyper::Error) -> Self {
+        Self::new(format!("OpenAI API HTTP error: {}", value))
+    }
+}
+
+impl From<http::Error> for ApiError {
+    fn from(value: http::Error) -> Self {
+        Self::new(format!("Unable to build OpenAI API request: {}", value))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Endpoint {
     tls: bool,
     host: String,
     authority: String,
     port: u16,
+}
+
+struct ApiTarget {
+    endpoint: Endpoint,
     path: String,
 }
 
-impl Endpoint {
+impl ApiTarget {
     fn parse(url: &str) -> Result<Self, ApiError> {
         let (tls, rest, default_port) = if let Some(rest) = url.strip_prefix("https://") {
             (true, rest, 443)
@@ -122,90 +145,158 @@ impl Endpoint {
         }
 
         Ok(Self {
-            tls,
-            host: host.to_string(),
-            authority: authority.to_string(),
-            port,
+            endpoint: Endpoint {
+                tls,
+                host: host.to_string(),
+                authority: authority.to_string(),
+                port,
+            },
             path,
         })
     }
 }
 
-async fn post_json(url: &str, bearer_token: &str, body: &[u8]) -> Result<(), ApiError> {
-    let endpoint = Endpoint::parse(url)?;
-    let mut request = format!(
-        concat!(
-            "POST {} HTTP/1.1\r\n",
-            "Host: {}\r\n",
-            "Authorization: Bearer {}\r\n",
-            "Content-Type: application/json\r\n",
-            "Accept: */*\r\n",
-            "User-Agent: ai-operator/{}\r\n",
-            "Connection: close\r\n",
-            "Content-Length: {}\r\n",
-            "\r\n"
-        ),
-        endpoint.path,
-        endpoint.authority,
-        bearer_token,
-        env!("CARGO_PKG_VERSION"),
-        body.len()
-    )
-    .into_bytes();
-    request.extend_from_slice(body);
+struct ApiConnection {
+    endpoint: Endpoint,
+    sender: ApiSender,
+}
 
-    let tcp_stream = TcpStream::connect((endpoint.host.as_str(), endpoint.port)).await?;
-    let response = if endpoint.tls {
+pub struct ApiHttpClient {
+    bearer_token: Arc<String>,
+    connector: TlsConnector,
+    connection: Mutex<Option<ApiConnection>>,
+}
+
+impl ApiHttpClient {
+    pub fn new(bearer_token: Arc<String>) -> Self {
         let root_store = RootCertStore::from_iter(TLS_SERVER_ROOTS.iter().cloned());
         let config = ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
-        let connector = TlsConnector::from(Arc::new(config));
-        let server_name = ServerName::try_from(endpoint.host.clone())
-            .map_err(|err| ApiError::new(format!("Invalid OpenAI API host: {}", err)))?;
-        let mut stream = connector.connect(server_name, tcp_stream).await?;
-        send_and_read(&mut stream, &request).await?
-    } else {
-        let mut stream = tcp_stream;
-        send_and_read(&mut stream, &request).await?
-    };
 
-    handle_response(&response)
-}
-
-async fn send_and_read<S>(stream: &mut S, request: &[u8]) -> Result<Vec<u8>, ApiError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    stream.write_all(request).await?;
-    stream.flush().await?;
-
-    let mut response = Vec::with_capacity(4096);
-    stream.read_to_end(&mut response).await?;
-    Ok(response)
-}
-
-fn handle_response(response: &[u8]) -> Result<(), ApiError> {
-    let header_end = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .ok_or_else(|| ApiError::new("Malformed OpenAI API response"))?;
-    let header = String::from_utf8_lossy(&response[..header_end]);
-    let status = header
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| ApiError::new("Malformed OpenAI API status line"))?;
-
-    if (200..300).contains(&status) {
-        return Ok(());
+        Self {
+            bearer_token,
+            connector: TlsConnector::from(Arc::new(config)),
+            connection: Mutex::new(None),
+        }
     }
 
-    let body_start = header_end + 4;
-    let body = String::from_utf8_lossy(response.get(body_start..).unwrap_or_default());
-    error!("{} response from OpenAI API:\n{}", status, body);
-    Err(ApiError::status(status, body))
+    async fn post_json(&self, url: &str, body: Vec<u8>) -> Result<(), ApiError> {
+        let target = ApiTarget::parse(url)?;
+        let request = self.build_request(&target, body)?;
+        let mut connection = self.connection.lock().await;
+
+        self.ensure_connection(&mut connection, &target.endpoint)
+            .await?;
+
+        let response = match connection
+            .as_mut()
+            .expect("OpenAI API connection not initialised")
+            .sender
+            .send_request(request)
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                *connection = None;
+                return Err(err.into());
+            }
+        };
+
+        let status = response.status();
+        let body = response.into_body().collect().await?.to_bytes();
+
+        if connection
+            .as_ref()
+            .is_some_and(|connection| connection.sender.is_closed())
+        {
+            *connection = None;
+        }
+
+        handle_response(status, &body)
+    }
+
+    fn build_request(
+        &self,
+        target: &ApiTarget,
+        body: Vec<u8>,
+    ) -> Result<Request<RequestBody>, ApiError> {
+        Ok(Request::builder()
+            .method("POST")
+            .uri(target.path.as_str())
+            .header(header::HOST, target.endpoint.authority.as_str())
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", self.bearer_token),
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "*/*")
+            .header(
+                header::USER_AGENT,
+                concat!("ai-operator/", env!("CARGO_PKG_VERSION")),
+            )
+            .body(Full::new(Bytes::from(body)))?)
+    }
+
+    async fn ensure_connection(
+        &self,
+        connection: &mut Option<ApiConnection>,
+        endpoint: &Endpoint,
+    ) -> Result<(), ApiError> {
+        if connection.as_ref().is_none_or(|connection| {
+            connection.endpoint != *endpoint || connection.sender.is_closed()
+        }) {
+            *connection = Some(self.connect(endpoint).await?);
+        }
+
+        if let Some(existing) = connection.as_mut() {
+            if let Err(err) = existing.sender.ready().await {
+                debug!("Reconnecting OpenAI API HTTP session: {}", err);
+                *connection = Some(self.connect(endpoint).await?);
+                connection
+                    .as_mut()
+                    .expect("OpenAI API connection not initialised")
+                    .sender
+                    .ready()
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn connect(&self, endpoint: &Endpoint) -> Result<ApiConnection, ApiError> {
+        let tcp_stream = TcpStream::connect((endpoint.host.as_str(), endpoint.port)).await?;
+        let stream = if endpoint.tls {
+            let server_name = ServerName::try_from(endpoint.host.clone())
+                .map_err(|err| ApiError::new(format!("Invalid OpenAI API host: {}", err)))?;
+            MaybeTlsStream::Rustls(self.connector.connect(server_name, tcp_stream).await?)
+        } else {
+            MaybeTlsStream::Plain(tcp_stream)
+        };
+
+        let (sender, connection) = http1::handshake(TokioIo::new(stream)).await?;
+        tokio::spawn(async move {
+            if let Err(err) = connection.await {
+                debug!("OpenAI API HTTP connection ended: {}", err);
+            }
+        });
+
+        Ok(ApiConnection {
+            endpoint: endpoint.clone(),
+            sender,
+        })
+    }
+}
+
+fn handle_response(status: StatusCode, body: &[u8]) -> Result<(), ApiError> {
+    if status.is_success() {
+        Ok(())
+    } else {
+        let body = String::from_utf8_lossy(body);
+        error!("{} response from OpenAI API:\n{}", status, body);
+        Err(ApiError::status(status.as_u16(), body))
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -458,5 +549,116 @@ pub struct HangupCall;
 impl OpenApiCall for HangupCall {
     fn get_url(&self, call_id: &str) -> String {
         format!("{}/{}/hangup", API_ROOT, call_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+        time::timeout,
+    };
+
+    #[tokio::test]
+    async fn decodes_chunked_error_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_request(&mut stream).await;
+            stream
+                .write_all(
+                    b"HTTP/1.1 400 Bad Request\r\n\
+                    Transfer-Encoding: chunked\r\n\
+                    Content-Type: application/json\r\n\
+                    \r\n\
+                    f\r\n{\"error\":\"bad\"}\r\n\
+                    0\r\n\
+                    \r\n",
+                )
+                .await
+                .unwrap();
+        });
+
+        let client = ApiHttpClient::new(Arc::new("test-token".to_string()));
+        let err = client
+            .post_json(&format!("http://{}/test", addr), b"{}".to_vec())
+            .await
+            .unwrap_err();
+
+        let err = err.to_string();
+        assert!(err.contains(r#"{"error":"bad"}"#));
+        assert!(!err.contains("\nf\n"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reuses_open_http_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            for _ in 0..2 {
+                read_request(&mut stream).await;
+                stream
+                    .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let client = ApiHttpClient::new(Arc::new("test-token".to_string()));
+        timeout(Duration::from_secs(2), async {
+            client
+                .post_json(&format!("http://{}/first", addr), b"{}".to_vec())
+                .await
+                .unwrap();
+            client
+                .post_json(&format!("http://{}/second", addr), b"{}".to_vec())
+                .await
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+    }
+
+    async fn read_request(stream: &mut TcpStream) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        loop {
+            let mut chunk = [0; 1024];
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert_ne!(read, 0, "connection closed before request completed");
+            buffer.extend_from_slice(&chunk[..read]);
+
+            if let Some(header_end) = find_header_end(&buffer) {
+                let content_length = content_length(&buffer[..header_end]);
+                let request_end = header_end + 4 + content_length;
+                while buffer.len() < request_end {
+                    let read = stream.read(&mut chunk).await.unwrap();
+                    assert_ne!(read, 0, "connection closed before body completed");
+                    buffer.extend_from_slice(&chunk[..read]);
+                }
+                return buffer;
+            }
+        }
+    }
+
+    fn find_header_end(buffer: &[u8]) -> Option<usize> {
+        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn content_length(headers: &[u8]) -> usize {
+        String::from_utf8_lossy(headers)
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .unwrap_or_default()
     }
 }

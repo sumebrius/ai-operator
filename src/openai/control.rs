@@ -87,6 +87,7 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 
 pub struct OpenAiControlSession {
     call_id: String,
+    api_client: api::ApiHttpClient,
     token: Arc<String>,
     prompt: Arc<String>,
     sip_realm: Arc<String>,
@@ -95,9 +96,11 @@ pub struct OpenAiControlSession {
 
 impl OpenAiControlSession {
     pub fn new(state: &AppState, call_id: &str) -> Self {
+        let token = state.openai_key();
         Self {
             call_id: call_id.to_string(),
-            token: state.openai_key(),
+            api_client: api::ApiHttpClient::new(token.clone()),
+            token,
             prompt: state.prompt(),
             sip_realm: state.sip_realm(),
             valid_transfers: Mutex::new(Vec::new()),
@@ -175,8 +178,8 @@ impl OpenAiControlSession {
 }
 
 impl ApiClient for OpenAiControlSession {
-    fn bearer_token(&self) -> &str {
-        &self.token
+    fn api_client(&self) -> &api::ApiHttpClient {
+        &self.api_client
     }
 }
 
