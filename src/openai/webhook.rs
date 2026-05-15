@@ -6,7 +6,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use chrono::{DateTime, Utc, serde::ts_seconds};
 use http::StatusCode;
 use serde::{self, Deserialize, Serialize};
 
@@ -19,8 +18,7 @@ pub struct RealtimeCallIncoming {
     object: String,
     #[serde(rename = "type")]
     event_type: String,
-    #[serde(with = "ts_seconds")]
-    created_at: DateTime<Utc>,
+    created_at: i64,
     data: RealtimeCallIncomingData,
 }
 

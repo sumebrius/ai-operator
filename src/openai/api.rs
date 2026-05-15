@@ -6,46 +6,206 @@ use crate::{
     config::{API_ROOT, DEFAULT_MODEL},
     openai::tools::Tool,
 };
-use reqwest::{Client, Response};
+use std::{fmt, sync::Arc};
+
 use serde::{Serialize, Serializer};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::TcpStream,
+};
+use tokio_rustls::{
+    TlsConnector,
+    rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
+};
+use webpki_roots::TLS_SERVER_ROOTS;
 
 /// Again, could this just be a method on the single implementor?
 /// Again, yes.
 pub trait ApiClient {
-    fn client(&self) -> &Client;
+    fn bearer_token(&self) -> &str;
 
     /// Send an event
-    async fn execute(
-        &self,
-        action: impl OpenApiCall,
-        call_id: &str,
-    ) -> Result<Response, reqwest::Error> {
-        let response = self
-            .client()
-            .post(action.get_url(call_id))
-            .json(&action)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error = response.error_for_status_ref().unwrap_err();
-            error!(
-                "{} response from OpenAI API:\n{}",
-                response.status(),
-                response
-                    .text()
-                    .await
-                    .unwrap_or_else(|err| format!("{:?}", err))
-            );
-            Err(error)
-        } else {
-            response.error_for_status()
-        }
+    async fn execute(&self, action: impl OpenApiCall, call_id: &str) -> Result<(), ApiError> {
+        let url = action.get_url(call_id);
+        let body = serde_json::to_vec(&action)?;
+        post_json(&url, self.bearer_token(), &body).await
     }
 }
 
 pub trait OpenApiCall: Serialize {
     fn get_url(&self, call_id: &str) -> String;
+}
+
+#[derive(Debug)]
+pub struct ApiError {
+    status: Option<u16>,
+    message: String,
+}
+
+impl ApiError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            status: None,
+            message: message.into(),
+        }
+    }
+
+    fn status(status: u16, message: impl Into<String>) -> Self {
+        Self {
+            status: Some(status),
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.status {
+            Some(status) => write!(f, "{} response from OpenAI API: {}", status, self.message),
+            None => f.write_str(&self.message),
+        }
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+impl From<serde_json::Error> for ApiError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::new(format!("Unable to encode OpenAI API request: {}", value))
+    }
+}
+
+impl From<std::io::Error> for ApiError {
+    fn from(value: std::io::Error) -> Self {
+        Self::new(format!("OpenAI API transport error: {}", value))
+    }
+}
+
+struct Endpoint {
+    tls: bool,
+    host: String,
+    authority: String,
+    port: u16,
+    path: String,
+}
+
+impl Endpoint {
+    fn parse(url: &str) -> Result<Self, ApiError> {
+        let (tls, rest, default_port) = if let Some(rest) = url.strip_prefix("https://") {
+            (true, rest, 443)
+        } else if let Some(rest) = url.strip_prefix("http://") {
+            (false, rest, 80)
+        } else {
+            return Err(ApiError::new(format!(
+                "Unsupported OpenAI API URL: {}",
+                url
+            )));
+        };
+
+        let (authority, path) = match rest.split_once('/') {
+            Some((authority, path)) => (authority, format!("/{}", path)),
+            None => (rest, "/".to_string()),
+        };
+
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => {
+                let port = port
+                    .parse()
+                    .map_err(|_| ApiError::new(format!("Invalid OpenAI API port: {}", port)))?;
+                (host, port)
+            }
+            _ => (authority, default_port),
+        };
+
+        if host.is_empty() {
+            return Err(ApiError::new(format!("Invalid OpenAI API URL: {}", url)));
+        }
+
+        Ok(Self {
+            tls,
+            host: host.to_string(),
+            authority: authority.to_string(),
+            port,
+            path,
+        })
+    }
+}
+
+async fn post_json(url: &str, bearer_token: &str, body: &[u8]) -> Result<(), ApiError> {
+    let endpoint = Endpoint::parse(url)?;
+    let mut request = format!(
+        concat!(
+            "POST {} HTTP/1.1\r\n",
+            "Host: {}\r\n",
+            "Authorization: Bearer {}\r\n",
+            "Content-Type: application/json\r\n",
+            "Accept: */*\r\n",
+            "User-Agent: ai-operator/{}\r\n",
+            "Connection: close\r\n",
+            "Content-Length: {}\r\n",
+            "\r\n"
+        ),
+        endpoint.path,
+        endpoint.authority,
+        bearer_token,
+        env!("CARGO_PKG_VERSION"),
+        body.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(body);
+
+    let tcp_stream = TcpStream::connect((endpoint.host.as_str(), endpoint.port)).await?;
+    let response = if endpoint.tls {
+        let root_store = RootCertStore::from_iter(TLS_SERVER_ROOTS.iter().cloned());
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
+        let server_name = ServerName::try_from(endpoint.host.clone())
+            .map_err(|err| ApiError::new(format!("Invalid OpenAI API host: {}", err)))?;
+        let mut stream = connector.connect(server_name, tcp_stream).await?;
+        send_and_read(&mut stream, &request).await?
+    } else {
+        let mut stream = tcp_stream;
+        send_and_read(&mut stream, &request).await?
+    };
+
+    handle_response(&response)
+}
+
+async fn send_and_read<S>(stream: &mut S, request: &[u8]) -> Result<Vec<u8>, ApiError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    stream.write_all(request).await?;
+    stream.flush().await?;
+
+    let mut response = Vec::with_capacity(4096);
+    stream.read_to_end(&mut response).await?;
+    Ok(response)
+}
+
+fn handle_response(response: &[u8]) -> Result<(), ApiError> {
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| ApiError::new("Malformed OpenAI API response"))?;
+    let header = String::from_utf8_lossy(&response[..header_end]);
+    let status = header
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| ApiError::new("Malformed OpenAI API status line"))?;
+
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+
+    let body_start = header_end + 4;
+    let body = String::from_utf8_lossy(response.get(body_start..).unwrap_or_default());
+    error!("{} response from OpenAI API:\n{}", status, body);
+    Err(ApiError::status(status, body))
 }
 
 #[derive(Serialize, Debug)]

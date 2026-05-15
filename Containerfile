@@ -1,12 +1,12 @@
-FROM rust:1-alpine as builder
+FROM rust:1-alpine AS builder
 
 WORKDIR /build
-RUN apk add --no-cache musl-dev
-RUN cargo install cargo-auditable
+RUN apk add --no-cache musl-dev upx
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 COPY Cargo.lock Cargo.toml ./
 COPY src/ src/
-RUN cargo auditable build --release --target x86_64-unknown-linux-musl
+RUN cargo build --locked --release --target x86_64-unknown-linux-musl
+RUN upx --best --lzma /build/target/x86_64-unknown-linux-musl/release/ai-operator
 
 # Runtime image
 FROM scratch

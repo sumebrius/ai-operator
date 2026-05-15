@@ -1,12 +1,13 @@
-/// Mostly structs defining events we receive from the WS connection
-/// as defined here https://platform.openai.com/docs/api-reference/realtime-server-events
-#[cfg(debug_assertions)]
-use std::{fs::File, io::Write, time::SystemTime};
-
-#[cfg(debug_assertions)]
-use chrono::{DateTime, Utc};
+// Mostly structs defining events we receive from the WS connection
+// as defined here https://platform.openai.com/docs/api-reference/realtime-server-events
 use futures_util::{StreamExt, stream::SplitStream};
 use serde::{Deserialize, Serialize};
+#[cfg(debug_assertions)]
+use std::{
+    fs::File,
+    io::Write,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
@@ -34,13 +35,12 @@ pub struct MessageSource {
 impl MessageSource {
     #[cfg(debug_assertions)]
     pub fn new(stream: WsSource, call_id: &str) -> Self {
-        let now: DateTime<Utc> = SystemTime::now().into();
-        let file = File::create(format!(
-            "call_logs/{}_{}.jsonl",
-            now.naive_local().format("%Y-%m-%dT%H:%M:%S"),
-            call_id
-        ))
-        .expect("Cant open log file");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX epoch")
+            .as_secs();
+        let file = File::create(format!("call_logs/{}_{}.jsonl", now, call_id))
+            .expect("Cant open log file");
 
         Self {
             debug_file: file,

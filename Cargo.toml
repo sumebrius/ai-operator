@@ -5,50 +5,57 @@ edition = "2024"
 
 [dependencies]
 # Webhook listener API
-axum = "0.8.6"
-# Storing the prompt as bytes, it's chonky and gets passed around a lot
-bytes = { version = "1.10.1", features = ["serde"] }
-# Serdeing timestamps and timestamping logfiles
-chrono = { version = "0.4.42", features = ["serde"] }
+axum = { version = "0.8.6", default-features = false, features = [
+    "http1",
+    "json",
+    "tokio",
+] }
 # Just for reading the contact list
 csv = "1.4.0"
 # Provides a trait for easy looping async websocket events
-futures-util = "0.3.31"
+futures-util = { version = "0.3.31", default-features = false, features = [
+    "sink",
+    "std",
+] }
 # I just want to spit out some status codes
 http = "1.3.1"
-# reqwest and tokio_tungstenite both use rustls as openssl
-# is fucky in trixie-slim images so native-tls don't work.
-# REST API interactions
-reqwest = { version = "0.12.24", features = [
-    "json",
-    "rustls-tls",
-    # Defaults except native-tls
-    "charset",
-    "http2",
-    "system-proxy",
-], default-features = false }
-# Generating JSON schemas for tool calls
-schemars = "1.1.0"
 # Have a guess...
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde = { version = "1.0.228", default-features = false, features = [
+    "derive",
+    "std",
+] }
+serde_json = { version = "1.0.145", default-features = false, features = ["std"] }
 # Webhook validation
 standardwebhooks = "1.0.1"
 # Have a guess...
-tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.48.0", features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+] }
+# REST API interactions share the same Rustls stack as the websocket client.
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
 # Websocket API interactions
 tokio-tungstenite = { version = "0.28.0", features = [
-    "tokio-rustls",
+    "connect",
+    "handshake",
     "rustls-tls-webpki-roots",
-] }
-# Logging the axum stack
-tower-http = { version = "0.6.6", features = ["trace"] }
+], default-features = false }
 # Logging
-tracing = "0.1.41"
-tracing-subscriber = "0.3.20"
+tracing = { version = "0.1.41", default-features = false, features = [
+    "attributes",
+    "std",
+] }
+tracing-subscriber = { version = "0.3.20", default-features = false, features = [
+    "fmt",
+    "std",
+] }
+webpki-roots = "0.26.11"
 
 [profile.release]
 strip = "symbols"
 opt-level = "z"
 lto = true
 codegen-units = 1
+panic = "abort"

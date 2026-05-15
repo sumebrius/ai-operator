@@ -4,8 +4,8 @@
 /// The run function is called by the `FunctionCall` event in server events,
 ///   which mixes that in with its own deets to generate the client event.
 /// And the call of that is done in the innermost loop of the main control thread.
-use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
+use serde_json::{Value, json};
 
 use crate::contacts::ContactList;
 
@@ -13,7 +13,7 @@ pub trait FunctionTool {
     /// Args taken by the tool. We generate a schema to tell the model how to call it.
     /// Note that this always needs to be a full struct, otherwise the API gets thoroughly
     /// confused and times out. Use `NullArgs` if no args are required.
-    type Args<'a>: JsonSchema + Deserialize<'a>;
+    type Args<'a>: Deserialize<'a>;
     /// The Return type of the tool's payload back to the model.
     type Return: Serialize;
     /// Description of the tool. Used to describe it to the model, so make it prompty.
@@ -41,8 +41,12 @@ pub trait FunctionTool {
     }
 
     /// Just here for serialisation
-    fn parameters() -> Option<Schema> {
-        Some(schema_for!(Self::Args<'_>))
+    fn parameters() -> Option<Value> {
+        Some(json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }))
     }
 }
 
@@ -100,18 +104,17 @@ pub enum SideEffectResult {
     Error(String),
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
 pub struct NullArgs {}
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Serialize)]
 pub struct ValidateResult {
     valid: bool,
     call_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
 pub struct ValidatePhoneNumberArgs {
-    #[schemars(description = "An array of individual digits of the phone number to check")]
     digits: Vec<usize>,
 }
 
@@ -163,6 +166,21 @@ impl FunctionTool for ValidatePhoneNumber {
             Err(_) => bad_check("Invalid digits"),
         }
     }
+
+    fn parameters() -> Option<Value> {
+        Some(json!({
+            "type": "object",
+            "properties": {
+                "digits": {
+                    "type": "array",
+                    "items": { "type": "integer", "minimum": 0 },
+                    "description": "An array of individual digits of the phone number to check"
+                }
+            },
+            "required": ["digits"],
+            "additionalProperties": false
+        }))
+    }
 }
 
 /// Basically just ? for the above tool's execute.
@@ -177,11 +195,8 @@ fn bad_check(reason: &str) -> (ValidateResult, SideEffect) {
     )
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
 pub struct ValidateContactArgs {
-    #[schemars(
-        description = "An array of contact names to check. If a location is specified, add it to the end separated by a space. eg. \"Bob Office\""
-    )]
     contact: Vec<String>,
 }
 
@@ -227,6 +242,21 @@ impl FunctionTool for ValidateContact {
             SideEffect::Noop,
         )
     }
+
+    fn parameters() -> Option<Value> {
+        Some(json!({
+            "type": "object",
+            "properties": {
+                "contact": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "An array of contact names to check. If a location is specified, add it to the end separated by a space. eg. \"Bob Office\""
+                }
+            },
+            "required": ["contact"],
+            "additionalProperties": false
+        }))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -248,16 +278,13 @@ impl FunctionTool for ListContacts {
         (ContactList::from_default().list(), SideEffect::Noop)
     }
 
-    fn parameters() -> Option<Schema> {
+    fn parameters() -> Option<Value> {
         None
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
 pub struct TransferArgs {
-    #[schemars(
-        description = "The call_id returned by a previous successful call to ValidatePhoneNumber or ValidateContact"
-    )]
     call_id: String,
 }
 
@@ -278,21 +305,31 @@ impl FunctionTool for Transfer {
         info!("Call transfer request: {:?}", args);
         ((), SideEffect::Transfer(args.call_id))
     }
+
+    fn parameters() -> Option<Value> {
+        Some(json!({
+            "type": "object",
+            "properties": {
+                "call_id": {
+                    "type": "string",
+                    "description": "The call_id returned by a previous successful call to ValidatePhoneNumber or ValidateContact"
+                }
+            },
+            "required": ["call_id"],
+            "additionalProperties": false
+        }))
+    }
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
 pub struct TerminateArgs {
-    #[schemars(description = "The reason for terminating the call")]
     reason: TerminateReason,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize)]
 pub enum TerminateReason {
-    #[schemars(description = "User requested termination")]
     UserRequested,
-    #[schemars(description = "User is uncooperative")]
     UserUncooperative,
-    #[schemars(description = "Other reason. This should rarely be used")]
     Other,
 }
 
@@ -309,8 +346,23 @@ impl FunctionTool for Terminate {
     "#;
 
     fn execute(&self, args: Self::Args<'_>, _call_id: &str) -> (Self::Return, SideEffect) {
-        warn!("Call termination request: {:?}", args);
+        warn!("Call termination request: {:?}", args.reason);
         ((), SideEffect::Terminate)
+    }
+
+    fn parameters() -> Option<Value> {
+        Some(json!({
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "enum": ["UserRequested", "UserUncooperative", "Other"],
+                    "description": "The reason for terminating the call"
+                }
+            },
+            "required": ["reason"],
+            "additionalProperties": false
+        }))
     }
 }
 
@@ -350,7 +402,7 @@ macro_rules! build_tools {
             {
                 let (name, description, parameters) = match self {
                     $(Tool::$tool => {
-                        (stringify!($tool), $tool::DESCRIPTION, &$tool::parameters())
+                        (stringify!($tool), $tool::DESCRIPTION, $tool::parameters())
                     },)*
                 };
 
@@ -358,7 +410,7 @@ macro_rules! build_tools {
                 ser.serialize_entry("type", "function")?;
                 ser.serialize_entry("name", name)?;
                 ser.serialize_entry("description", description)?;
-                ser.serialize_entry("parameters", parameters)?;
+                ser.serialize_entry("parameters", &parameters)?;
                 ser.end()
             }
         }
