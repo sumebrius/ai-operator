@@ -2,7 +2,6 @@
 use std::sync::Arc;
 
 use futures_util::lock::Mutex;
-use reqwest::{Client, Response, header};
 use tracing::Instrument;
 
 use super::api::{self, ApiClient};
@@ -88,7 +87,7 @@ pub async fn handle_call(state: AppState, call: RealtimeCallIncoming) {
 
 pub struct OpenAiControlSession {
     call_id: String,
-    api_client: Client,
+    api_client: api::ApiHttpClient,
     token: Arc<String>,
     prompt: Arc<String>,
     sip_realm: Arc<String>,
@@ -98,28 +97,17 @@ pub struct OpenAiControlSession {
 impl OpenAiControlSession {
     pub fn new(state: &AppState, call_id: &str) -> Self {
         let token = state.openai_key();
-
-        let mut headers = header::HeaderMap::new();
-        let mut auth =
-            header::HeaderValue::try_from(format!("Bearer {}", &token)).expect("Fucky API key");
-        auth.set_sensitive(true);
-        headers.insert(header::AUTHORIZATION, auth);
-        let client = reqwest::ClientBuilder::new()
-            .default_headers(headers)
-            .build()
-            .expect("Fucky Client");
-
         Self {
             call_id: call_id.to_string(),
-            api_client: client,
-            token: state.openai_key(),
+            api_client: api::ApiHttpClient::new(token.clone()),
+            token,
             prompt: state.prompt(),
             sip_realm: state.sip_realm(),
             valid_transfers: Mutex::new(Vec::new()),
         }
     }
 
-    pub async fn accept(&self, voice: Voice) -> Result<Response, reqwest::Error> {
+    pub async fn accept(&self, voice: Voice) -> Result<(), api::ApiError> {
         let payload = api::AcceptCall::new(&self.prompt, voice);
         self.execute(payload, &self.call_id)
             .await
@@ -128,7 +116,7 @@ impl OpenAiControlSession {
             })
     }
 
-    pub async fn _reject(&self) -> Result<Response, reqwest::Error> {
+    pub async fn _reject(&self) -> Result<(), api::ApiError> {
         warn!("Rejecting call");
         let payload = api::_RejectCall::default();
         self.execute(payload, &self.call_id)
@@ -138,7 +126,7 @@ impl OpenAiControlSession {
             })
     }
 
-    pub async fn transfer(&self, target: &str) -> Result<Response, reqwest::Error> {
+    pub async fn transfer(&self, target: &str) -> Result<(), api::ApiError> {
         info!("Transferring call to {}", target);
         let target_uri = format!("sip:{}@{}", target, self.sip_realm);
         let payload = api::ReferCall::new(target_uri);
@@ -149,7 +137,7 @@ impl OpenAiControlSession {
             })
     }
 
-    pub async fn hangup(&self) -> Result<Response, reqwest::Error> {
+    pub async fn hangup(&self) -> Result<(), api::ApiError> {
         warn!("Terminating call");
         let payload = api::HangupCall;
         self.execute(payload, &self.call_id)
@@ -190,7 +178,7 @@ impl OpenAiControlSession {
 }
 
 impl ApiClient for OpenAiControlSession {
-    fn client(&self) -> &Client {
+    fn api_client(&self) -> &api::ApiHttpClient {
         &self.api_client
     }
 }

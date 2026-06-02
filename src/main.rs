@@ -2,10 +2,12 @@
 extern crate tracing;
 
 use axum::{
-    Router, middleware,
+    Router,
+    extract::Request,
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post},
 };
-use tower_http::trace::TraceLayer;
 
 use crate::{config::AppState, openai::webhook};
 
@@ -43,11 +45,19 @@ async fn main() {
     let app = Router::new()
         .nest("/livez", liveness)
         .nest("/webhook", webhook_server)
-        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(trace_request))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 
     info!("Serving Webhook server");
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn trace_request(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let response = next.run(request).await;
+    info!(%method, %uri, status = %response.status(), "HTTP request");
+    response
 }
